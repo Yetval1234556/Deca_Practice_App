@@ -1,15 +1,15 @@
 /* Typography & base */
 :root {
-  --bg: #0d1117;
-  --card: #0f1624;
-  --muted: #96a2c2;
-  --text: #e7edf5;
-  --accent: #7cf3c3;
-  --accent-2: #7db7ff;
-  --danger: #ff6b6b;
+  --bg: #f3f7ff;
+  --card: #ffffff;
+  --muted: #4a577a;
+  --text: #0b1026;
+  --accent: #ff7a3d;
+  --accent-2: #4c8dff;
+  --danger: #e63946;
   --warning: #f6c177;
   --radius: 14px;
-  --shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+  --shadow: 0 18px 44px rgba(35, 51, 115, 0.18);
   font-family: 'Space Grotesk', 'Segoe UI', sans-serif;
 }
 
@@ -18,9 +18,10 @@
 body {
   margin: 0;
   padding: 24px 24px 48px;
-  background: radial-gradient(circle at 20% 20%, rgba(124, 243, 195, 0.06), transparent 30%),
-              radial-gradient(circle at 80% 0%, rgba(125, 183, 255, 0.07), transparent 32%),
-              var(--bg);
+  background:
+    radial-gradient(circle at 15% 20%, rgba(255, 122, 61, 0.16), transparent 30%),
+    radial-gradient(circle at 80% 8%, rgba(76, 141, 255, 0.2), transparent 32%),
+    var(--bg);
   color: var(--text);
   min-height: 100vh;
 }
@@ -28,9 +29,9 @@ body {
 .bg-grid {
   position: fixed;
   inset: 0;
-  background-image: linear-gradient(transparent 95%, rgba(255, 255, 255, 0.04) 95%), linear-gradient(90deg, transparent 95%, rgba(255, 255, 255, 0.04) 95%);
+  background-image: linear-gradient(transparent 95%, rgba(11, 16, 38, 0.05) 95%), linear-gradient(90deg, transparent 95%, rgba(11, 16, 38, 0.05) 95%);
   background-size: 36px 36px;
-  opacity: 0.25;
+  opacity: 0.35;
   pointer-events: none;
   z-index: 0;
 }
@@ -68,9 +69,9 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   gap: 8px;
   padding: 10px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: var(--muted);
+  background: rgba(76, 141, 255, 0.1);
+  border: 1px solid rgba(76, 141, 255, 0.24);
+  color: var(--text);
 }
 
 .pill .dot {
@@ -78,7 +79,7 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   height: 10px;
   border-radius: 50%;
   background: var(--accent);
-  box-shadow: 0 0 0 6px rgba(124, 243, 195, 0.18);
+  box-shadow: 0 0 0 6px rgba(255, 122, 61, 0.2);
 }
 
 .layout {
@@ -91,7 +92,7 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 
 .panel {
   background: var(--card);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(12, 26, 70, 0.08);
   border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
@@ -120,8 +121,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 
 .test-card {
   padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: #f9fbff;
+  border: 1px solid rgba(12, 26, 70, 0.08);
   border-radius: var(--radius);
   display: flex;
   justify-content: space-between;
@@ -129,7 +130,7 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   align-items: center;
 }
 
-.test-card:hover { border-color: rgba(124, 243, 195, 0.45); }
+.test-card:hover { border-color: rgba(255, 122, 61, 0.45); box-shadow: 0 10px 30px rgba(76, 141, 255, 0.12); }
 .test-meta h4 { margin-bottom: 4px; }
 .test-meta p { font-size: 14px; }
 
@@ -142,8 +143,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 .count-select {
   padding: 8px 10px;
   border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(12, 26, 70, 0.12);
+  background: #eef2ff;
   color: var(--text);
 }
 
@@ -168,7 +169,7 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 .progress-shell {
   width: 100%;
   height: 8px;
-  background: rgba(255, 255, 255, 0.06);
+  background: rgba(12, 26, 70, 0.08);
   border-radius: 999px;
   overflow: hidden;
 }
@@ -181,8 +182,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 }
 
 .card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #ffffff;
+  border: 1px solid rgba(12, 26, 70, 0.08);
   border-radius: var(--radius);
   padding: 16px;
 }
@@ -209,19 +210,19 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   text-align: left;
   padding: 12px 14px;
   border-radius: var(--radius);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(12, 26, 70, 0.12);
+  background: #f6f8ff;
   color: var(--text);
   cursor: pointer;
   transition: transform 0.08s ease, border-color 0.12s ease, background 0.12s ease;
 }
 
-.option-btn:hover { transform: translateY(-1px); border-color: rgba(124, 243, 195, 0.4); }
+.option-btn:hover { transform: translateY(-1px); border-color: rgba(76, 141, 255, 0.5); }
 .option-btn:disabled { opacity: 0.65; cursor: not-allowed; transform: none; }
 
-.option-btn.correct { border-color: var(--accent); background: rgba(124, 243, 195, 0.1); }
-.option-btn.incorrect { border-color: var(--danger); background: rgba(255, 107, 107, 0.08); }
-.option-btn.revealed { box-shadow: 0 0 0 1px rgba(124, 243, 195, 0.5); }
+.option-btn.correct { border-color: var(--accent); background: rgba(255, 122, 61, 0.12); }
+.option-btn.incorrect { border-color: var(--danger); background: rgba(230, 57, 70, 0.12); }
+.option-btn.revealed { box-shadow: 0 0 0 1px rgba(76, 141, 255, 0.6); }
 
 .actions {
   margin-top: 16px;
@@ -239,10 +240,10 @@ button {
   font-weight: 600;
 }
 
-.primary { background: var(--accent); color: #0a1b12; }
-.secondary { background: rgba(255, 255, 255, 0.08); color: var(--text); }
-.ghost { background: transparent; color: var(--text); border: 1px solid rgba(255, 255, 255, 0.18); }
-.danger { background: var(--danger); color: #0d1117; }
+.primary { background: var(--accent); color: #0b1026; }
+.secondary { background: #eef2ff; color: var(--text); }
+.ghost { background: transparent; color: var(--text); border: 1px solid rgba(12, 26, 70, 0.24); }
+.danger { background: var(--danger); color: #ffffff; }
 
 .feedback {
   margin-top: 10px;
@@ -256,8 +257,8 @@ button {
   margin-top: 12px;
   padding: 10px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #f6f8ff;
+  border: 1px solid rgba(12, 26, 70, 0.08);
 }
 
 .hidden { display: none; }
@@ -270,16 +271,16 @@ button {
 .instructions {
   padding: 12px;
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px dashed rgba(255, 255, 255, 0.08);
+  background: #f9fbff;
+  border: 1px dashed rgba(12, 26, 70, 0.12);
   font-size: 14px;
 }
 
 .summary-item {
   padding: 10px;
   border-radius: 10px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(12, 26, 70, 0.08);
+  background: #f9fbff;
   margin-top: 8px;
 }
 
