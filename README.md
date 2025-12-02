@@ -11,7 +11,7 @@ Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numb
    ```bash
    python3 app.py
    ```
-3. Open http://localhost:5000 and pick a test. Answers are never sent to the page source until you click **Show correct answer**.
+3. Open http://localhost:8080 and pick a test. Answers are never sent to the page source until you click **Show correct answer** (API fetch).
 
 ## Adding DECA PDFs
 1. Place PDF files inside `tests/` (e.g., `tests/marketing_exam.pdf`).
@@ -21,8 +21,8 @@ Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numb
 3. Click **Reload** in the UI or refresh the page to pick up newly added PDFs. No restart needed.
 
 ## How it works
-- The backend reads every PDF in `tests/`, extracts lines, finds the answer section (line containing “answer” or the final third of the file), parses the answer key with regex, and pairs it to numbered questions, options, answers, and explanations.
-- Questions without matching answers or options are skipped to avoid broken practice items.
+- The backend reads every PDF in `tests/`, extracts lines, finds the answer section (line containing “answer” or the final third of the file), parses the answer key with regex, and pairs it to numbered questions, options, answers, and explanations. Dense answer lines such as `97.B 98.C 99.D` are split and explanations are captured until the next answer entry for stability near the end of PDFs.
+- Questions without matching answers or options are skipped to avoid broken practice items. Only questions numbered 1–100 are kept and sorted to preserve DECA order.
 - `/api/tests` lists available tests.
 - `/api/tests/<id>/questions?count=N` returns `N` questions (or all) in numeric order without answers.
 - `/api/tests/<id>/check/<question_id>` returns only whether a selected option index is correct.
@@ -31,14 +31,14 @@ Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numb
 ## Frontend features
 - Test selection sidebar with question-count picker (10, 25, 50, 100, or all), numeric order, and progress bar.
 - One-question-at-a-time flow with immediate correct/incorrect feedback.
-- Timer tracking total session time (and per-question time shown in summary).
+- Timer tracking total session time (and per-question time shown in summary) with a toggle to hide/show the clock without pausing or resetting progress.
 - Dedicated **Show correct answer** button that fetches the answer and explanation on demand.
 - Results summary with score, missed questions, and explanations from the answer key; optional “Show explanations for all.”
 - Restart current test or pick another without restarting the server.
 
 ## Deploying/serving
-- Local: `python3 app.py` (honors `HOST`/`PORT` env vars).
-- Production-style: `gunicorn app:app` (add `--bind 0.0.0.0:5000` as needed).
+- Local: `python3 app.py` (honors `HOST`/`PORT` env vars; default 0.0.0.0:8080).
+- Production-style: `gunicorn app:app` (add `--bind 0.0.0.0:8080` as needed).
 
 ## Tips for reliable parsing
 - Keep question numbers at the start of a line like `12) Question text` or `12. Question text`.

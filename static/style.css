@@ -165,6 +165,7 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 .active-test { font-size: 20px; font-weight: 600; }
 .score-block { text-align: right; }
 .timer-block { text-align: center; }
+.timer-block button { margin-top: 6px; }
 
 .progress-shell {
   width: 100%;
@@ -244,6 +245,7 @@ button {
 .secondary { background: #eef2ff; color: var(--text); }
 .ghost { background: transparent; color: var(--text); border: 1px solid rgba(12, 26, 70, 0.24); }
 .danger { background: var(--danger); color: #ffffff; }
+.small-btn { padding: 6px 10px; font-size: 13px; }
 
 .feedback {
   margin-top: 10px;

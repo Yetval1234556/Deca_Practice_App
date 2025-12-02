@@ -13,6 +13,7 @@ const state = {
   timerInterval: null,
   totalElapsedMs: 0,
   perQuestionMs: {}, // questionId -> ms
+  timerHidden: false,
 };
 
 const testListEl = document.getElementById("test-list");
@@ -26,6 +27,7 @@ const restartBtn = document.getElementById("restart-test");
 const backToTestsBtn = document.getElementById("back-to-tests");
 const showAllExplanationsBtn = document.getElementById("show-all-explanations");
 const timerDisplay = document.getElementById("timer-display");
+const toggleTimerBtn = document.getElementById("toggle-timer");
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (tag) => {
@@ -59,12 +61,14 @@ function formatMs(ms) {
 
 function updateTimerDisplay() {
   if (!state.sessionStart) {
-    timerDisplay.textContent = "00:00";
+    timerDisplay.textContent = state.timerHidden ? "— —" : "00:00";
     return;
   }
   const elapsed = Date.now() - state.sessionStart;
   state.totalElapsedMs = elapsed;
-  timerDisplay.textContent = formatMs(elapsed);
+  if (!state.timerHidden) {
+    timerDisplay.textContent = formatMs(elapsed);
+  }
 }
 
 function startSessionTimer() {
@@ -81,6 +85,12 @@ function stopSessionTimer() {
   }
   clearInterval(state.timerInterval);
   state.timerInterval = null;
+}
+
+function toggleTimer() {
+  state.timerHidden = !state.timerHidden;
+  toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
+  updateTimerDisplay();
 }
 
 function startQuestionTimer() {
@@ -429,6 +439,7 @@ showAllExplanationsBtn.addEventListener("click", () => {
   if (!state.activeTest) return;
   showSummary(true);
 });
+toggleTimerBtn.addEventListener("click", toggleTimer);
 backToTestsBtn.addEventListener("click", () => {
   state.activeTest = null;
   state.questions = [];

@@ -13,6 +13,7 @@ app = Flask(__name__, static_folder="static", template_folder="templates")
 
 
 def _lines_from_pdf(path: Path) -> List[str]:
+    """Extract lines from a PDF while preserving page order and trimming noise."""
     reader = PdfReader(str(path))
     lines: List[str] = []
     for page in reader.pages:
@@ -20,6 +21,8 @@ def _lines_from_pdf(path: Path) -> List[str]:
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if line:
+                # Remove duplicated internal spacing that can scramble tokens
+                line = re.sub(r"\s{2,}", " ", line)
                 lines.append(line)
     return lines
 
@@ -81,69 +84,88 @@ def _find_answer_section_start(lines: List[str]) -> int:
     return max(len(lines) - max(10, len(lines) // 3), 0)
 
 
-def _parse_answer_key(lines: List[str], start: int) -> Dict[int, Dict[str, str]]:
+def _explode_answer_lines(lines: List[str]) -> List[str]:
+    """Split dense answer key lines like '97.B 98.C' into separate lines."""
+    answer_chunk = re.compile(r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*[A-E]\b", re.IGNORECASE)
+    expanded: List[str] = []
+    for line in lines:
+        matches = list(answer_chunk.finditer(line))
+        if len(matches) <= 1:
+            expanded.append(line)
+            continue
+        for idx, match in enumerate(matches):
+            start = match.start()
+            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(line)
+            chunk = line[start:end].strip()
+            if chunk:
+                expanded.append(chunk)
+    return expanded
+
+
+def _parse_answer_key(lines: List[str], start: int, raw_text: str) -> Dict[int, Dict[str, str]]:
+    """Parse answers plus explanations with guards for scrambled tail sections."""
     # Allow a bit of prefix noise (e.g., copyright text before "1.A") but avoid matching mid-number years.
     answer_pattern = re.compile(
         r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE
     )
     answers: Dict[int, Dict[str, str]] = {}
-    i = start
-    while i < len(lines):
-        line = lines[i]
-        match = answer_pattern.search(line)
-        if not match:
-            i += 1
-            continue
-        number = int(match.group(1))
-        letter = match.group(2).upper()
-        explanation_parts: List[str] = []
-        remainder = match.group(3).strip()
-        if remainder:
-            explanation_parts.append(remainder)
-        i += 1
-        # Capture subsequent lines until next answer entry.
-        while i < len(lines):
-            lookahead = lines[i]
-            if answer_pattern.search(lookahead):
-                break
-            if lookahead.strip():
-                explanation_parts.append(lookahead.strip())
-            i += 1
-        answers[number] = {
-            "letter": letter,
-            "explanation": " ".join(explanation_parts).strip(),
-        }
-    # If we clearly missed most answers, scan the whole document as a fallback
-    if len(answers) < 50:
+    expanded_lines = _explode_answer_lines(lines[start:])
+
+    def harvest(line_iterable: List[str]):
         i = 0
-        while i < len(lines):
-            line = lines[i]
+        while i < len(line_iterable):
+            line = line_iterable[i]
             match = answer_pattern.search(line)
             if not match:
                 i += 1
                 continue
             number = int(match.group(1))
             letter = match.group(2).upper()
-            if number in answers:
-                i += 1
-                continue
             explanation_parts: List[str] = []
             remainder = match.group(3).strip()
             if remainder:
                 explanation_parts.append(remainder)
             i += 1
-            while i < len(lines):
-                lookahead = lines[i]
+            # Capture subsequent lines until next answer entry.
+            while i < len(line_iterable):
+                lookahead = line_iterable[i]
                 if answer_pattern.search(lookahead):
                     break
                 if lookahead.strip():
                     explanation_parts.append(lookahead.strip())
                 i += 1
-            answers[number] = {
-                "letter": letter,
-                "explanation": " ".join(explanation_parts).strip(),
-            }
-    return answers
+            if 1 <= number <= 100:  # keep strict bounds
+                answers[number] = {
+                    "letter": letter,
+                    "explanation": " ".join(explanation_parts).strip(),
+                }
+
+    # Primary pass (dedicated answer slice)
+    harvest(expanded_lines)
+
+    # If we clearly missed many answers, scan the whole document as a fallback
+    if len(answers) < 80:
+        harvest(_explode_answer_lines(lines))
+
+    # Last-resort scan directly on text to catch tightly packed keys near EOF
+    if len(answers) < 80:
+        blob_pattern = re.compile(
+            r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b(?:\s*(.*?))(?=(?<!\d)\d{1,3}\s*[:.\-)]?\s*[A-E]\b|\Z)",
+            re.IGNORECASE | re.S,
+        )
+        for match in blob_pattern.finditer(raw_text):
+            number = int(match.group(1))
+            letter = match.group(2).upper()
+            explanation = (match.group(3) or "").replace("\n", " ").strip()
+            if 1 <= number <= 100 and number not in answers:
+                answers[number] = {"letter": letter, "explanation": explanation}
+
+    # Normalize ordering and enforce 1..100 bounds
+    cleaned = {
+        n: answers[n]
+        for n in sorted(num for num in answers.keys() if 1 <= num <= 100)
+    }
+    return cleaned
 
 
 def _parse_questions(lines: List[str], stop: int | None = None) -> List[Dict[str, Any]]:
@@ -255,9 +277,9 @@ def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
     lines = _lines_from_pdf(path)
     if not lines:
         return {}
-    answer_start = _find_answer_section_start(lines)
-    answers = _parse_answer_key(lines, answer_start)
     text = "\n".join(lines)
+    answer_start = _find_answer_section_start(lines)
+    answers = _parse_answer_key(lines, answer_start, text)
     sources: List[List[Dict[str, Any]]] = []
     block_parsed = _parse_question_blocks(text)
     if block_parsed:
@@ -278,6 +300,9 @@ def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
     questions_raw = list(merged.values())
     test_id = path.stem
     questions = _attach_answers(test_id, questions_raw, answers)
+    questions = [
+        q for q in questions if isinstance(q.get("number"), int) and 1 <= q["number"] <= 100
+    ]
     questions = sorted(questions, key=lambda q: q["number"])
     return {
         "id": test_id,
@@ -417,5 +442,5 @@ def reveal_answer(test_id: str, question_id: str):
 
 if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "5001"))
+    port = int(os.getenv("PORT", "8080"))
     app.run(host=host, port=port, debug=False)
