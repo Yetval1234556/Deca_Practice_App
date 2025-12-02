@@ -1,15 +1,41 @@
+import json
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 from flask import Flask, jsonify, render_template, request, abort
 from pypdf import PdfReader
+from werkzeug.exceptions import HTTPException
 
 BASE_DIR = Path(__file__).parent.resolve()
 TESTS_DIR = BASE_DIR / "tests"
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+
+
+@app.errorhandler(HTTPException)
+def _json_http_error(exc: HTTPException):
+    """Return consistent JSON errors for API routes."""
+    if request.path.startswith("/api/"):
+        response = exc.get_response()
+        payload = {"error": exc.name, "description": exc.description}
+        response.data = json.dumps(payload)
+        response.content_type = "application/json"
+        response.status_code = exc.code or 500
+        return response
+    return exc
+
+
+@app.errorhandler(Exception)
+def _json_generic_error(exc: Exception):
+    """Fallback JSON error surface for unexpected API failures."""
+    if isinstance(exc, HTTPException):
+        return _json_http_error(exc)
+    if request.path.startswith("/api/"):
+        app.logger.exception("Unhandled error during API request")
+        return jsonify({"error": "Internal Server Error", "description": str(exc)}), 500
+    raise exc
 
 
 def _lines_from_pdf(path: Path) -> List[str]:
@@ -313,6 +339,7 @@ def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
 
 
 _CACHE: Dict[str, Any] = {"stamp": 0.0, "tests": {}, "files": []}
+_MISSED_BY_TEST: Dict[str, List[str]] = {}
 
 
 def load_all_tests() -> Dict[str, Dict[str, Any]]:
@@ -359,6 +386,44 @@ def _get_question_or_404(test: Dict[str, Any], question_id: str) -> Dict[str, An
     abort(404, description="Question not found")
 
 
+def _serialize_question_payload(question: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": question["id"],
+        "question": question["question"],
+        "options": question["options"],
+        "number": question.get("number"),
+    }
+
+
+def get_incorrect_questions(test: Dict[str, Any], results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Filter a result list for incorrect answers and return sanitized questions."""
+    question_map = {q["id"]: q for q in test.get("questions", [])}
+    missed: List[Dict[str, Any]] = []
+    for item in results or []:
+        if not isinstance(item, dict):
+            continue
+        if item.get("correct") is not False:
+            continue
+        qid = item.get("question_id")
+        if qid in question_map:
+            missed.append(_serialize_question_payload(question_map[qid]))
+    return missed
+
+
+def _select_questions_for_mode(
+    test: Dict[str, Any], mode: str = "regular", count: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    questions = list(test["questions"])
+    if mode == "review_incorrect":
+        missed_ids = set(_MISSED_BY_TEST.get(test["id"], []))
+        if not missed_ids:
+            return []
+        questions = [q for q in questions if q["id"] in missed_ids]
+    if count and count > 0:
+        questions = questions[: min(count, len(questions))]
+    return [_serialize_question_payload(q) for q in questions]
+
+
 @app.route("/")
 def home():
     return render_template("index.html")
@@ -392,15 +457,7 @@ def get_questions(test_id: str):
                 questions = questions[:desired]
         except ValueError:
             pass
-    sanitized = [
-        {
-            "id": q["id"],
-            "question": q["question"],
-            "options": q["options"],
-            "number": q.get("number"),
-        }
-        for q in questions
-    ]
+    sanitized = [_serialize_question_payload(q) for q in questions]
     return jsonify(
         {
             "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
@@ -408,6 +465,76 @@ def get_questions(test_id: str):
             "selected_count": len(sanitized),
         }
     )
+
+
+@app.route("/api/tests/<test_id>/start_quiz", methods=["POST"])
+def start_quiz(test_id: str):
+    test = _get_test_or_404(test_id)
+    payload = request.get_json(silent=True) or {}
+    raw_count = payload.get("count")
+    try:
+        count = int(raw_count) if raw_count is not None else None
+        if count is not None and count < 0:
+            count = None
+    except (TypeError, ValueError):
+        count = None
+    mode = payload.get("mode", "regular")
+    if mode not in {"regular", "review_incorrect"}:
+        mode = "regular"
+    questions = _select_questions_for_mode(test, mode, count=count)
+    if not questions:
+        if mode == "review_incorrect":
+            abort(400, description="No missed questions recorded yet for this test.")
+        abort(400, description="No questions available for this request.")
+    try:
+        time_limit_seconds = int(payload.get("time_limit_seconds", 0))
+        if time_limit_seconds < 0:
+            time_limit_seconds = 0
+    except (TypeError, ValueError):
+        time_limit_seconds = 0
+    return jsonify(
+        {
+            "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
+            "questions": questions,
+            "selected_count": len(questions),
+            "mode": mode,
+            "time_limit_seconds": time_limit_seconds,
+        }
+    )
+
+
+@app.route("/api/tests/<test_id>/review_missed")
+def review_missed(test_id: str):
+    test = _get_test_or_404(test_id)
+    raw_count = request.args.get("count")
+    try:
+        count = int(raw_count) if raw_count else None
+    except (TypeError, ValueError):
+        count = None
+    questions = _select_questions_for_mode(test, mode="review_incorrect", count=count)
+    if not questions:
+        abort(404, description="No missed questions stored for this test yet.")
+    return jsonify(
+        {
+            "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
+            "questions": questions,
+            "selected_count": len(questions),
+            "mode": "review_incorrect",
+            "time_limit_seconds": 0,
+        }
+    )
+
+
+@app.route("/api/tests/<test_id>/results", methods=["POST"])
+def store_results(test_id: str):
+    test = _get_test_or_404(test_id)
+    payload = request.get_json(silent=True) or {}
+    results = payload.get("results")
+    if not isinstance(results, list):
+        abort(400, description="'results' must be a list.")
+    missed_questions = get_incorrect_questions(test, results)
+    _MISSED_BY_TEST[test["id"]] = [item["id"] for item in missed_questions]
+    return jsonify({"missed_count": len(missed_questions)})
 
 
 @app.route("/api/tests/<test_id>/check/<question_id>", methods=["POST"])

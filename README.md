@@ -24,16 +24,19 @@ Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numb
 - The backend reads every PDF in `tests/`, extracts lines, finds the answer section (line containing “answer” or the final third of the file), parses the answer key with regex, and pairs it to numbered questions, options, answers, and explanations. Dense answer lines such as `97.B 98.C 99.D` are split and explanations are captured until the next answer entry for stability near the end of PDFs.
 - Questions without matching answers or options are skipped to avoid broken practice items. Only questions numbered 1–100 are kept and sorted to preserve DECA order.
 - `/api/tests` lists available tests.
-- `/api/tests/<id>/questions?count=N` returns `N` questions (or all) in numeric order without answers.
+- `/api/tests/<id>/start_quiz` begins a session (accepts `count`, `mode` of `regular` or `review_incorrect`, and optional `time_limit_seconds`); `/api/tests/<id>/questions?count=N` remains for simple retrieval without mode metadata.
+- `/api/tests/<id>/results` stores missed questions for the last session; `/api/tests/<id>/review_missed` serves just the incorrect set.
 - `/api/tests/<id>/check/<question_id>` returns only whether a selected option index is correct.
 - `/api/tests/<id>/answer/<question_id>` returns the correct option and explanation when you choose to reveal or when the summary loads missed questions.
 
 ## Frontend features
 - Test selection sidebar with question-count picker (10, 25, 50, 100, or all), numeric order, and progress bar.
 - One-question-at-a-time flow with immediate correct/incorrect feedback.
+- Timed practice mode: set a countdown before starting; the timer auto-submits/grades when it hits zero.
 - Timer tracking total session time (and per-question time shown in summary) with a toggle to hide/show the clock without pausing or resetting progress.
 - Dedicated **Show correct answer** button that fetches the answer and explanation on demand.
 - Results summary with score, missed questions, and explanations from the answer key; optional “Show explanations for all.”
+- “Review incorrect only” mode to replay just the questions you missed in the previous session.
 - Restart current test or pick another without restarting the server.
 
 ## Deploying/serving

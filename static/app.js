@@ -14,6 +14,15 @@ const state = {
   totalElapsedMs: 0,
   perQuestionMs: {}, // questionId -> ms
   timerHidden: false,
+  timeLimitMs: 0,
+  timeRemainingMs: 0,
+  mode: "regular",
+  sessionComplete: false,
+  endedByTimer: false,
+  resultsPersisted: false,
+  lastResults: [],
+  lastRequestedCount: 0,
+  lastTimeLimitMinutes: 0,
 };
 
 const testListEl = document.getElementById("test-list");
@@ -28,6 +37,8 @@ const backToTestsBtn = document.getElementById("back-to-tests");
 const showAllExplanationsBtn = document.getElementById("show-all-explanations");
 const timerDisplay = document.getElementById("timer-display");
 const toggleTimerBtn = document.getElementById("toggle-timer");
+const reviewIncorrectBtn = document.getElementById("review-incorrect");
+const summaryNote = document.getElementById("summary-note");
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (tag) => {
@@ -60,13 +71,22 @@ function formatMs(ms) {
 }
 
 function updateTimerDisplay() {
+  if (state.timerHidden) {
+    timerDisplay.textContent = "— —";
+    return;
+  }
   if (!state.sessionStart) {
-    timerDisplay.textContent = state.timerHidden ? "— —" : "00:00";
+    const base = state.timeLimitMs ? formatMs(state.timeLimitMs) : "00:00";
+    timerDisplay.textContent = state.timeLimitMs ? `${base} left` : base;
     return;
   }
   const elapsed = Date.now() - state.sessionStart;
   state.totalElapsedMs = elapsed;
-  if (!state.timerHidden) {
+  if (state.timeLimitMs) {
+    const remaining = Math.max(state.timeLimitMs - elapsed, 0);
+    state.timeRemainingMs = remaining;
+    timerDisplay.textContent = `${formatMs(remaining)} left`;
+  } else {
     timerDisplay.textContent = formatMs(elapsed);
   }
 }
@@ -75,8 +95,9 @@ function startSessionTimer() {
   clearInterval(state.timerInterval);
   state.sessionStart = Date.now();
   state.totalElapsedMs = 0;
+  state.timeRemainingMs = state.timeLimitMs || 0;
   updateTimerDisplay();
-  state.timerInterval = setInterval(updateTimerDisplay, 1000);
+  state.timerInterval = setInterval(tickSessionTimer, 500);
 }
 
 function stopSessionTimer() {
@@ -85,12 +106,41 @@ function stopSessionTimer() {
   }
   clearInterval(state.timerInterval);
   state.timerInterval = null;
+  state.sessionStart = null;
+  state.questionStart = null;
 }
 
 function toggleTimer() {
   state.timerHidden = !state.timerHidden;
   toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
   updateTimerDisplay();
+}
+
+function tickSessionTimer() {
+  if (!state.sessionStart) return;
+  if (state.sessionComplete) {
+    stopSessionTimer();
+    return;
+  }
+  const elapsed = Date.now() - state.sessionStart;
+  state.totalElapsedMs = elapsed;
+  if (state.timeLimitMs) {
+    state.timeRemainingMs = Math.max(state.timeLimitMs - elapsed, 0);
+    if (state.timeRemainingMs <= 0 && !state.endedByTimer) {
+      handleTimeExpiry().catch((err) => console.error(err));
+      return;
+    }
+  }
+  updateTimerDisplay();
+}
+
+async function handleTimeExpiry() {
+  if (state.sessionComplete) return;
+  state.endedByTimer = true;
+  recordCurrentQuestionTime();
+  state.timeRemainingMs = 0;
+  updateTimerDisplay();
+  await showSummary(state.showAllExplanations);
 }
 
 function startQuestionTimer() {
@@ -154,6 +204,14 @@ function renderTestList() {
       { label: "50", value: 50 },
       { label: "100", value: 100 },
     ].filter((opt) => opt.value === 0 || opt.value <= test.question_count);
+    const timeOptions = [
+      { label: "No limit", value: 0 },
+      { label: "5 min", value: 5 },
+      { label: "10 min", value: 10 },
+      { label: "15 min", value: 15 },
+      { label: "20 min", value: 20 },
+      { label: "30 min", value: 30 },
+    ];
     card.innerHTML = `
       <div class="test-meta">
         <h4>${escapeHtml(test.name)}</h4>
@@ -169,27 +227,65 @@ function renderTestList() {
               .join("")}
           </select>
         </label>
+        <label>
+          <span class="muted small-label">Time limit</span>
+          <select class="time-select" data-test-id="${test.id}">
+            ${timeOptions.map((opt) => `<option value="${opt.value}">${opt.label}</option>`).join("")}
+          </select>
+        </label>
         <button class="primary" data-test-id="${test.id}">Start</button>
       </div>
     `;
     const startBtn = card.querySelector("button");
     const selectEl = card.querySelector(".count-select");
+    const timeSelect = card.querySelector(".time-select");
     startBtn.addEventListener("click", () => {
       const count = Number(selectEl.value);
-      startTest(test.id, count);
+      const timeLimit = Number(timeSelect.value);
+      startTest(test.id, count, "regular", timeLimit);
     });
     testListEl.appendChild(card);
   });
 }
 
-async function startTest(testId, count = 0) {
+async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
+  if (!testId) return;
+  state.lastRequestedCount = count;
+  state.lastTimeLimitMinutes = timeLimitMinutes;
+  state.mode = mode;
   try {
-    const query = count && count > 0 ? `?count=${count}` : "";
-    const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/questions${query}`);
-    if (!res.ok) throw new Error("Unable to load test");
-    const data = await res.json();
+    const payload = {
+      count: count > 0 ? count : undefined,
+      mode,
+      time_limit_seconds: timeLimitMinutes > 0 ? timeLimitMinutes * 60 : 0,
+    };
+    const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const bodyText = await res.text();
+    let data = null;
+    try {
+      data = bodyText ? JSON.parse(bodyText) : null;
+    } catch (err) {
+      data = null;
+    }
+    if (!res.ok || !data) {
+      const fallbackMessage =
+        mode === "review_incorrect"
+          ? "No missed questions recorded for this test yet."
+          : "Unable to load test";
+      const msg =
+        (data && (data.description || data.error || data.message)) ||
+        bodyText ||
+        fallbackMessage;
+      throw new Error(typeof msg === "string" ? msg : fallbackMessage);
+    }
     state.activeTest = data.test;
-    state.questions = data.questions;
+    state.mode = data.mode || mode || "regular";
+    state.questions = data.questions || [];
+    if (!state.questions.length) throw new Error("No questions returned for this session.");
     state.currentIndex = 0;
     state.score = 0;
     state.answers = {};
@@ -197,6 +293,12 @@ async function startTest(testId, count = 0) {
     state.totalAvailable = data.test?.total || state.questions.length;
     state.showAllExplanations = false;
     state.perQuestionMs = {};
+    state.timeLimitMs = (data.time_limit_seconds || 0) * 1000;
+    state.timeRemainingMs = state.timeLimitMs;
+    state.sessionComplete = false;
+    state.endedByTimer = false;
+    state.resultsPersisted = false;
+    state.lastResults = [];
     startSessionTimer();
     activeTestName.textContent = state.activeTest.name;
     questionArea.classList.remove("hidden");
@@ -205,7 +307,7 @@ async function startTest(testId, count = 0) {
     updateScore();
     updateProgress();
   } catch (err) {
-    questionArea.innerHTML = `<div class="placeholder"><p class="muted">${err.message}</p></div>`;
+    questionArea.innerHTML = `<div class="placeholder"><p class="muted">${escapeHtml(err.message || "Unable to load test")}</p></div>`;
   }
 }
 
@@ -220,10 +322,15 @@ function renderQuestionCard() {
     return;
   }
 
+  if (state.sessionComplete) return;
   startQuestionTimer();
   const question = state.questions[state.currentIndex];
   const status = state.answers[question.id];
   const answered = questionDone(question.id);
+  const modeLabel = state.mode === "review_incorrect" ? "Review missed" : "Practice";
+  const limitLabel = state.timeLimitMs ? `${Math.round(state.timeLimitMs / 60000)}m limit` : "Untimed";
+  const disableOptions = state.sessionComplete || state.endedByTimer || (status && status.choice !== undefined);
+  const controlsDisabled = state.sessionComplete || state.endedByTimer;
   const feedbackText = status
     ? status.correct
       ? "Correct!"
@@ -241,14 +348,14 @@ function renderQuestionCard() {
       </div>
       <div class="pill">
         <span class="dot"></span>
-        <span>${escapeHtml(state.activeTest.name)} · ${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length}</span>
+        <span>${escapeHtml(state.activeTest.name)} · ${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length} • ${modeLabel}${state.timeLimitMs ? ` • ${limitLabel}` : ""}</span>
       </div>
     </div>
     <div class="options">
       ${question.options
         .map(
           (option, idx) =>
-            `<button class="option-btn" data-idx="${idx}" ${status && status.choice !== undefined ? "disabled" : ""}>
+            `<button class="option-btn" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
               <strong>${String.fromCharCode(65 + idx)}.</strong> ${escapeHtml(option)}
             </button>`
         )
@@ -259,8 +366,8 @@ function renderQuestionCard() {
     </div>
     <div id="explanation" class="explanation ${status && status.revealed ? "" : "hidden"}"></div>
     <div class="actions">
-      <button id="show-answer" class="secondary">Show correct answer</button>
-      <button id="next-question" class="primary" ${answered ? "" : "disabled"}>${isLast ? "Finish" : "Next question"}</button>
+      <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>Show correct answer</button>
+      <button id="next-question" class="primary" ${answered && !controlsDisabled ? "" : "disabled"}>${isLast ? "Finish" : "Next question"}</button>
     </div>
   `;
 
@@ -291,12 +398,13 @@ function renderQuestionCard() {
   showAnswerBtn.addEventListener("click", () => revealAnswer(question));
   const nextBtn = document.getElementById("next-question");
   nextBtn.addEventListener("click", nextQuestion);
-  nextBtn.disabled = !answered;
+  nextBtn.disabled = controlsDisabled || !answered;
   updateScore();
   updateProgress();
 }
 
 async function handleAnswer(question, choiceIndex) {
+  if (state.sessionComplete || state.endedByTimer) return;
   const existing = state.answers[question.id];
   if (existing && existing.choice !== undefined) return;
   recordCurrentQuestionTime();
@@ -327,6 +435,7 @@ async function handleAnswer(question, choiceIndex) {
 }
 
 async function revealAnswer(question) {
+  if (state.sessionComplete || state.endedByTimer) return;
   try {
     const details = await ensureAnswerDetails(question);
     state.answers[question.id] = { ...(state.answers[question.id] || {}), ...details, revealed: true };
@@ -355,12 +464,12 @@ function renderExplanation(question, status) {
 }
 
 async function nextQuestion() {
+  if (state.sessionComplete || state.endedByTimer) return;
   recordCurrentQuestionTime();
   const currentQuestion = state.questions[state.currentIndex];
   if (!questionDone(currentQuestion.id)) return;
   if (state.currentIndex >= state.questions.length - 1) {
     await showSummary(state.showAllExplanations);
-    stopSessionTimer();
     progressFill.style.width = "100%";
     return;
   }
@@ -368,25 +477,64 @@ async function nextQuestion() {
   renderQuestionCard();
 }
 
+async function persistResults() {
+  if (!state.activeTest || state.resultsPersisted) return;
+  const results = state.questions.map((q) => {
+    const status = state.answers[q.id];
+    return { question_id: q.id, correct: Boolean(status && status.correct === true) };
+  });
+  state.lastResults = results;
+  try {
+    const res = await fetch(
+      `/api/tests/${encodeURIComponent(state.activeTest.id)}/results`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ results }),
+      }
+    );
+    if (!res.ok) throw new Error("Failed to store session results");
+    state.resultsPersisted = true;
+  } catch (err) {
+    console.warn("Could not store missed questions", err);
+  }
+}
+
 async function showSummary(showAll = false) {
-  recordCurrentQuestionTime();
-  stopSessionTimer();
+  if (!state.sessionComplete) {
+    state.sessionComplete = true;
+    recordCurrentQuestionTime();
+    stopSessionTimer();
+  }
   questionArea.classList.add("hidden");
   summaryArea.classList.remove("hidden");
   const summaryScore = document.getElementById("summary-score");
   const summaryAccuracy = document.getElementById("summary-accuracy");
   const summaryList = document.getElementById("summary-list");
   const summaryTime = document.getElementById("summary-time");
+  const noteMessages = [];
+  if (state.endedByTimer) {
+    noteMessages.push("Session ended because the timer ran out.");
+  }
+  if (state.mode === "review_incorrect") {
+    noteMessages.push("Reviewing missed questions only.");
+  }
+  summaryNote.textContent = noteMessages.join(" ");
+  summaryNote.classList.toggle("hidden", !noteMessages.length);
   const total = state.questions.length;
+  const displayTotal = total || state.selectedCount || 0;
+  scoreDisplay.textContent = `${state.score} / ${displayTotal}`;
   const accuracy = total ? Math.round((state.score / total) * 100) : 0;
   summaryScore.textContent = `You answered ${state.score} out of ${total} correctly.`;
   summaryAccuracy.textContent = `Accuracy: ${accuracy}%`;
-  summaryTime.textContent = `Total time: ${formatMs(state.totalElapsedMs || 0)}`;
+  summaryTime.textContent = `Total time: ${formatMs(state.totalElapsedMs || 0)}${
+    state.timeLimitMs ? ` (limit ${formatMs(state.timeLimitMs)})` : ""
+  }`;
   summaryList.innerHTML = "";
   const targets = state.questions.filter((q) => {
     const status = state.answers[q.id];
-    if (!status) return false;
-    return showAll || status.correct === false;
+    if (showAll) return true;
+    return status && status.correct === false;
   });
   try {
     await Promise.all(targets.map((q) => ensureAnswerDetails(q)));
@@ -396,26 +544,26 @@ async function showSummary(showAll = false) {
   state.showAllExplanations = showAll;
 
   state.questions.forEach((q, idx) => {
-    const status = state.answers[q.id];
+    const status = state.answers[q.id] || {};
     let label = "Not answered";
     let tone = "";
-    if (status) {
-      if (status.correct === true) {
-        label = "Correct";
-        tone = "correct";
-      } else if (status.correct === false) {
-        label = "Incorrect";
-        tone = "incorrect";
-      } else if (status.revealed) {
-        label = "Revealed";
-      }
+    if (status.correct === true) {
+      label = "Correct";
+      tone = "correct";
+    } else if (status.correct === false) {
+      label = "Incorrect";
+      tone = "incorrect";
+    } else if (status.revealed) {
+      label = "Revealed";
+    } else if (state.endedByTimer) {
+      label = "Not answered (timed out)";
     }
     const item = document.createElement("div");
     item.className = "summary-item";
-    const shouldShowExplanation = status && (status.correct === false || showAll);
+    const shouldShowExplanation = showAll || status.correct === false;
     const timeTaken = state.perQuestionMs[q.id] || 0;
     const explanationHtml =
-      shouldShowExplanation && status && status.explanation !== undefined
+      shouldShowExplanation && status.explanation !== undefined
         ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
             status.explanation || "No explanation provided."
           )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
@@ -427,12 +575,18 @@ async function showSummary(showAll = false) {
     `;
     summaryList.appendChild(item);
   });
+  await persistResults();
 }
 
 reloadBtn.addEventListener("click", fetchTests);
 restartBtn.addEventListener("click", () => {
   if (state.activeTest) {
-    startTest(state.activeTest.id);
+    startTest(
+      state.activeTest.id,
+      state.lastRequestedCount || 0,
+      state.mode || "regular",
+      state.lastTimeLimitMinutes || 0
+    );
   }
 });
 showAllExplanationsBtn.addEventListener("click", () => {
@@ -440,6 +594,15 @@ showAllExplanationsBtn.addEventListener("click", () => {
   showSummary(true);
 });
 toggleTimerBtn.addEventListener("click", toggleTimer);
+reviewIncorrectBtn.addEventListener("click", () => {
+  if (!state.activeTest) return;
+  startTest(
+    state.activeTest.id,
+    0,
+    "review_incorrect",
+    state.lastTimeLimitMinutes || 0
+  );
+});
 backToTestsBtn.addEventListener("click", () => {
   state.activeTest = null;
   state.questions = [];
@@ -450,6 +613,16 @@ backToTestsBtn.addEventListener("click", () => {
   state.totalAvailable = 0;
   state.showAllExplanations = false;
   state.perQuestionMs = {};
+  state.timeLimitMs = 0;
+  state.timeRemainingMs = 0;
+  state.mode = "regular";
+  state.sessionComplete = false;
+  state.endedByTimer = false;
+  state.resultsPersisted = false;
+  state.lastResults = [];
+  state.lastRequestedCount = 0;
+  state.lastTimeLimitMinutes = 0;
+  summaryNote.classList.add("hidden");
   stopSessionTimer();
   updateTimerDisplay();
   activeTestName.textContent = "None selected";
