@@ -45,3 +45,14 @@ Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numb
 - Label options with leading letters: `A)`, `B.`, `C -`, etc. Multi-line option text is appended to the previous option.
 - Ensure the answer key uses clear number-to-letter pairs; any spacing or punctuation is fine (`1 A`, `1. A`, `1-A`). Explanations placed directly after the answer line are captured until the next answer entry.
 - If a PDF cannot be parsed, check the server logs for “Skipping …” messages that describe why a file or question was skipped.
+
+## Key backend functions (app.py)
+- `_lines_from_pdf(path)`: extracts trimmed lines from each page, normalizing double-spaces to keep tokens in order.
+- `_find_answer_section_start(lines)`: locates the likely start of the answer key (explicit “answer” line or final third of the PDF).
+- `_explode_answer_lines(lines)`: splits dense answer key lines like `97.B 98.C` into separate chunks for stable parsing.
+- `_parse_answer_key(lines, start, raw_text)`: builds answer/explanation map with fallbacks (expanded lines and full-text scan) while bounding to questions 1–100.
+- `_parse_questions(lines, stop=None)` and `_parse_question_blocks(text)`: recover numbered questions and options (inline or multi-line), preferring content before the answer section.
+- `_attach_answers(test_id, questions, answers)`: pairs questions to answers by letter/index, pruning items with missing options or mismatched keys.
+- `_parse_pdf_to_test(path)`: orchestrates parsing a PDF into a test payload, normalizing ids/names and enforcing order 1–100.
+- `load_all_tests()`: caches parsed tests from `tests/` and reloads on file mtime change.
+- Routes: `/api/tests`, `/api/tests/<id>/questions`, `/api/tests/<id>/check/<qid>`, `/api/tests/<id>/answer/<qid>` power the UI.
