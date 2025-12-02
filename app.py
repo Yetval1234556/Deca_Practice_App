@@ -82,13 +82,15 @@ def _find_answer_section_start(lines: List[str]) -> int:
 
 
 def _parse_answer_key(lines: List[str], start: int) -> Dict[int, Dict[str, str]]:
-    # Anchor at line start to avoid accidental matches inside explanations.
-    answer_pattern = re.compile(r"^\s*(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
+    # Allow a bit of prefix noise (e.g., copyright text before "1.A") but avoid matching mid-number years.
+    answer_pattern = re.compile(
+        r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE
+    )
     answers: Dict[int, Dict[str, str]] = {}
     i = start
     while i < len(lines):
         line = lines[i]
-        match = answer_pattern.match(line)
+        match = answer_pattern.search(line)
         if not match:
             i += 1
             continue
@@ -102,7 +104,7 @@ def _parse_answer_key(lines: List[str], start: int) -> Dict[int, Dict[str, str]]
         # Capture subsequent lines until next answer entry.
         while i < len(lines):
             lookahead = lines[i]
-            if answer_pattern.match(lookahead):
+            if answer_pattern.search(lookahead):
                 break
             if lookahead.strip():
                 explanation_parts.append(lookahead.strip())
@@ -116,7 +118,7 @@ def _parse_answer_key(lines: List[str], start: int) -> Dict[int, Dict[str, str]]
         i = 0
         while i < len(lines):
             line = lines[i]
-            match = answer_pattern.match(line)
+            match = answer_pattern.search(line)
             if not match:
                 i += 1
                 continue
@@ -132,7 +134,7 @@ def _parse_answer_key(lines: List[str], start: int) -> Dict[int, Dict[str, str]]
             i += 1
             while i < len(lines):
                 lookahead = lines[i]
-                if answer_pattern.match(lookahead):
+                if answer_pattern.search(lookahead):
                     break
                 if lookahead.strip():
                     explanation_parts.append(lookahead.strip())
