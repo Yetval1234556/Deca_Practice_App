@@ -38,10 +38,33 @@ def _json_generic_error(exc: Exception):
     raise exc
 
 
-def _lines_from_pdf(path: Path) -> List[str]:
-    """Extract lines from a PDF while preserving page order and trimming noise."""
+def _lines_from_pdf(path: Path, footer_hint: Optional[str] = None) -> List[str]:
+    """Extract lines from a PDF while preserving order and trimming repeated footer noise."""
     reader = PdfReader(str(path))
     lines: List[str] = []
+    footer_tokens: List[str] = []
+    if footer_hint:
+        normalized = re.sub(r"[_\-]+", " ", footer_hint)
+        normalized = re.sub(r"\s{2,}", " ", normalized).strip()
+        if normalized:
+            footer_tokens.append(normalized)
+            upper_variant = normalized.upper()
+            if upper_variant != normalized:
+                footer_tokens.append(upper_variant)
+
+    def strip_footer(text: str) -> str:
+        if not footer_tokens:
+            return text
+        cleaned = text
+        for token in footer_tokens:
+            cleaned = re.sub(
+                rf"\s*(?:[–—-]|•)?\s*{re.escape(token)}\s*$",
+                "",
+                cleaned,
+                flags=re.IGNORECASE,
+            )
+        return cleaned.strip()
+
     for page in reader.pages:
         text = page.extract_text() or ""
         for raw_line in text.splitlines():
@@ -49,7 +72,9 @@ def _lines_from_pdf(path: Path) -> List[str]:
             if line:
                 # Remove duplicated internal spacing that can scramble tokens
                 line = re.sub(r"\s{2,}", " ", line)
-                lines.append(line)
+                line = strip_footer(line)
+                if line:
+                    lines.append(line)
     return lines
 
 
@@ -300,7 +325,8 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
 
 
 def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
-    lines = _lines_from_pdf(path)
+    test_name_hint = re.sub(r"\s{2,}", " ", re.sub(r"[_\-]+", " ", path.stem)).strip()
+    lines = _lines_from_pdf(path, footer_hint=test_name_hint)
     if not lines:
         return {}
     text = "\n".join(lines)
@@ -330,9 +356,10 @@ def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
         q for q in questions if isinstance(q.get("number"), int) and 1 <= q["number"] <= 100
     ]
     questions = sorted(questions, key=lambda q: q["number"])
+    display_name = test_name_hint.title() if test_name_hint else path.stem
     return {
         "id": test_id,
-        "name": path.stem.replace("_", " ").title(),
+        "name": display_name,
         "description": f"Parsed from {path.name}",
         "questions": questions,
     }

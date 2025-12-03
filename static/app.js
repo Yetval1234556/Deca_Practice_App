@@ -23,6 +23,7 @@ const state = {
   lastResults: [],
   lastRequestedCount: 0,
   lastTimeLimitMinutes: 0,
+  questionGridCollapsed: false,
 };
 
 const testListEl = document.getElementById("test-list");
@@ -34,6 +35,8 @@ const activeTestName = document.getElementById("active-test-name");
 const scoreDisplay = document.getElementById("score-display");
 const questionGridShell = document.getElementById("question-grid-shell");
 const questionGrid = document.getElementById("question-grid");
+const questionGridWrapper = document.getElementById("question-grid-wrapper");
+const questionGridToggle = document.getElementById("toggle-grid");
 const restartBtn = document.getElementById("restart-test");
 const backToTestsBtn = document.getElementById("back-to-tests");
 const showAllExplanationsBtn = document.getElementById("show-all-explanations");
@@ -329,13 +332,30 @@ function goToQuestion(idx) {
 }
 
 function renderQuestionGrid() {
-  if (!questionGrid || !questionGridShell) return;
-  if (!state.questions.length || state.sessionComplete) {
+  if (!questionGrid || !questionGridShell || !questionGridWrapper) return;
+  const hasQuestions = Boolean(state.questions.length) && !state.sessionComplete;
+  if (!hasQuestions) {
+    questionGridWrapper.classList.add("hidden");
     questionGridShell.classList.add("hidden");
+    questionGrid.classList.add("hidden");
     questionGrid.innerHTML = "";
+    if (questionGridToggle) {
+      questionGridToggle.textContent = "Show boxes";
+      questionGridToggle.setAttribute("aria-expanded", "false");
+      questionGridToggle.disabled = true;
+    }
     return;
   }
-  questionGridShell.classList.remove("hidden");
+
+  questionGridWrapper.classList.remove("hidden");
+  if (questionGridToggle) {
+    questionGridToggle.disabled = false;
+    questionGridToggle.textContent = state.questionGridCollapsed ? "Show boxes" : "Hide boxes";
+    questionGridToggle.setAttribute("aria-expanded", (!state.questionGridCollapsed).toString());
+  }
+
+  questionGridShell.classList.toggle("hidden", state.questionGridCollapsed);
+  questionGrid.classList.toggle("hidden", state.questionGridCollapsed);
   questionGrid.innerHTML = "";
   state.questions.forEach((q, idx) => {
     const status = state.answers[q.id] || {};
@@ -358,39 +378,26 @@ function renderQuestionGrid() {
     }
     questionGrid.appendChild(btn);
   });
+
+  if (!state.questionGridCollapsed) {
+    scrollActiveQuestionIntoView();
+  }
 }
 
-function attachGridScrollHandlers() {
-  if (!questionGridShell) return;
-  let isDown = false;
-  let startX = 0;
-  let scrollLeft = 0;
+function scrollActiveQuestionIntoView() {
+  if (!questionGridShell || !questionGrid) return;
+  const activeBtn = questionGrid.querySelector(".qdot.active");
+  if (!activeBtn || typeof activeBtn.scrollIntoView !== "function") return;
+  const shellRect = questionGridShell.getBoundingClientRect();
+  const btnRect = activeBtn.getBoundingClientRect();
+  if (btnRect.top < shellRect.top || btnRect.bottom > shellRect.bottom) {
+    activeBtn.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "smooth" });
+  }
+}
 
-  questionGridShell.addEventListener("wheel", (e) => {
-    if (e.deltaY === 0) return;
-    questionGridShell.scrollLeft += e.deltaY;
-    e.preventDefault();
-  }, { passive: false });
-
-  questionGridShell.addEventListener("pointerdown", (e) => {
-    isDown = true;
-    startX = e.pageX - questionGridShell.offsetLeft;
-    scrollLeft = questionGridShell.scrollLeft;
-    questionGridShell.setPointerCapture(e.pointerId);
-  });
-  questionGridShell.addEventListener("pointermove", (e) => {
-    if (!isDown) return;
-    const x = e.pageX - questionGridShell.offsetLeft;
-    const walk = (x - startX);
-    questionGridShell.scrollLeft = scrollLeft - walk;
-  });
-  questionGridShell.addEventListener("pointerup", (e) => {
-    isDown = false;
-    questionGridShell.releasePointerCapture(e.pointerId);
-  });
-  questionGridShell.addEventListener("pointerleave", () => {
-    isDown = false;
-  });
+function toggleQuestionGrid() {
+  state.questionGridCollapsed = !state.questionGridCollapsed;
+  renderQuestionGrid();
 }
 
 function renderQuestionCard() {
@@ -445,6 +452,7 @@ function renderQuestionCard() {
     <div id="explanation" class="explanation ${status && status.revealed ? "" : "hidden"}"></div>
     <div class="actions">
       <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>Show correct answer</button>
+      <button id="submit-quiz" class="ghost" ${controlsDisabled ? "disabled" : ""}>Submit & score</button>
       <button id="next-question" class="primary" ${answered && !controlsDisabled ? "" : "disabled"}>${isLast ? "Finish" : "Next question"}</button>
     </div>
   `;
@@ -474,6 +482,11 @@ function renderQuestionCard() {
 
   const showAnswerBtn = document.getElementById("show-answer");
   showAnswerBtn.addEventListener("click", () => revealAnswer(question));
+  const submitBtn = document.getElementById("submit-quiz");
+  submitBtn.addEventListener("click", () => {
+    if (state.sessionComplete || state.endedByTimer) return;
+    showSummary(false);
+  });
   const nextBtn = document.getElementById("next-question");
   nextBtn.addEventListener("click", nextQuestion);
   nextBtn.disabled = controlsDisabled || !answered;
@@ -600,6 +613,17 @@ async function showSummary(showAll = false) {
   if (questionGrid) {
     questionGrid.classList.add("hidden");
   }
+  if (questionGridShell) {
+    questionGridShell.classList.add("hidden");
+  }
+  if (questionGridWrapper) {
+    questionGridWrapper.classList.add("hidden");
+  }
+  if (questionGridToggle) {
+    questionGridToggle.setAttribute("aria-expanded", "false");
+    questionGridToggle.textContent = "Show boxes";
+    questionGridToggle.disabled = true;
+  }
   const summaryScore = document.getElementById("summary-score");
   const summaryAccuracy = document.getElementById("summary-accuracy");
   const summaryList = document.getElementById("summary-list");
@@ -686,6 +710,9 @@ showAllExplanationsBtn.addEventListener("click", () => {
   showSummary(true);
 });
 toggleTimerBtn.addEventListener("click", toggleTimer);
+if (questionGridToggle) {
+  questionGridToggle.addEventListener("click", toggleQuestionGrid);
+}
 reviewIncorrectBtn.addEventListener("click", () => {
   if (!state.activeTest) return;
   startTest(
@@ -714,6 +741,7 @@ backToTestsBtn.addEventListener("click", () => {
   state.lastResults = [];
   state.lastRequestedCount = 0;
   state.lastTimeLimitMinutes = 0;
+  state.questionGridCollapsed = false;
   summaryNote.classList.add("hidden");
   stopSessionTimer();
   updateTimerDisplay();
@@ -724,6 +752,17 @@ backToTestsBtn.addEventListener("click", () => {
     questionGrid.classList.add("hidden");
     questionGrid.innerHTML = "";
   }
+  if (questionGridShell) {
+    questionGridShell.classList.add("hidden");
+  }
+  if (questionGridWrapper) {
+    questionGridWrapper.classList.add("hidden");
+  }
+  if (questionGridToggle) {
+    questionGridToggle.textContent = "Show boxes";
+    questionGridToggle.setAttribute("aria-expanded", "false");
+    questionGridToggle.disabled = true;
+  }
   renderQuestionCard();
   updateScore();
   updateProgress();
@@ -731,4 +770,3 @@ backToTestsBtn.addEventListener("click", () => {
 
 // Kick off
 fetchTests();
-attachGridScrollHandlers();
