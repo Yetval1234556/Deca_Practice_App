@@ -1,6 +1,13 @@
 # DECA Practice Lab
 
-Local Flask app that reads DECA test PDFs from `tests/`, extracts up to 100 numbered questions (kept in top-to-bottom order) plus answers and explanations, and serves a browser UI for one-at-a-time practice with instant feedback.
+**Built for DECA practice.** Drop any DECA exam PDF into `tests/` and get an instant, fully local drill UI—questions stay in order, answers and explanations stay hidden until you ask. No manual entry, no cloud calls, just your DECA tests plus fast feedback.
+
+## Highlights
+- **DECA-ready parser:** Handles 1–100 numbered questions with A–E options and dense answer keys.
+- **Instant scoring:** One-question flow with correct/incorrect feedback and optional timed mode.
+- **Full summaries:** Score, accuracy, per-question timing, and explanations from the answer key.
+- **Missed-only review:** Replay only what you got wrong to lock in weak spots.
+- **All local:** PDFs never leave your machine; answers are only fetched when you click **Show correct answer**.
 
 ## Quick start
 1. From the project root, install dependencies (Python 3.9+):
