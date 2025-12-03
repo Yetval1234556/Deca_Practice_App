@@ -6,6 +6,7 @@
 - **DECA-ready parser:** Handles 1–100 numbered questions with A–E options and dense answer keys.
 - **Instant scoring:** One-question flow with correct/incorrect feedback and optional timed mode.
 - **Jump anywhere:** Tap numbered boxes (1–100) to answer questions in any order.
+- **Light/dark themes:** Flip the appearance instantly from the Settings page; preference is remembered.
 - **Full summaries:** Score, accuracy, per-question timing, and explanations from the answer key.
 - **Missed-only review:** Replay only what you got wrong to lock in weak spots.
 - **All local:** PDFs never leave your machine; answers are only fetched when you click **Show correct answer**.

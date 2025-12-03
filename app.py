@@ -429,6 +429,11 @@ def home():
     return render_template("index.html")
 
 
+@app.route("/settings")
+def settings():
+    return render_template("settings.html")
+
+
 @app.route("/api/tests")
 def list_tests():
     tests = load_all_tests()
