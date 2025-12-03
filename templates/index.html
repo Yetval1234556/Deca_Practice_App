@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DECA Practice Lab</title>
+  <script>
+    (function () {
+      const saved = localStorage.getItem("deca-theme");
+      if (saved === "dark" || saved === "light") {
+        document.documentElement.setAttribute("data-theme", saved);
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">DECA Drill</p>
+      <h1>Competitive Event Practice Lab</h1>
+      <p class="subtitle">Drop DECA test PDFs into <code>tests/</code>, pick how many questions to practice, and drill with instant feedback.</p>
+    </div>
+    <div class="pill">
+      <span class="dot"></span>
+      <span>Local only • answers hidden until revealed</span>
+    </div>
+    <a class="ghost" href="{{ url_for('settings') }}">Settings</a>
+  </header>
+
+  <main class="layout">
+    <aside class="panel test-panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Tests</p>
+          <h2>Pick a Deck</h2>
+        </div>
+        <button class="ghost" id="reload-tests" title="Reload tests from disk">↻</button>
+      </div>
+      <div id="test-list" class="test-list">
+        <p class="muted">Looking for tests in <code>tests/</code>...</p>
+      </div>
+      <div class="instructions">
+        <p class="eyebrow">Add new tests</p>
+        <p>Place DECA PDFs in <code>tests/</code> (questions + answer key/explanations). Hit reload to load them automatically.</p>
+      </div>
+    </aside>
+
+    <section class="panel play-panel">
+      <div class="status-bar">
+        <div>
+          <p class="eyebrow">Current test</p>
+          <div id="active-test-name" class="active-test">None selected</div>
+        </div>
+      <div class="timer-block">
+        <p class="eyebrow">Time</p>
+        <div id="timer-display">00:00</div>
+        <button id="toggle-timer" class="ghost small-btn" title="Hide/show timer without pausing">Hide timer</button>
+      </div>
+      <div class="score-block">
+        <p class="eyebrow">Score</p>
+        <div id="score-display">0 / 0</div>
+      </div>
+    </div>
+    <div class="progress-shell">
+      <div id="progress-fill" class="progress-fill"></div>
+    </div>
+    <div class="question-grid-wrapper hidden" id="question-grid-wrapper">
+      <div class="question-grid-header">
+        <p class="eyebrow">Jump to question</p>
+        <button id="toggle-grid" class="ghost small-btn" type="button" aria-expanded="false">Show boxes</button>
+      </div>
+      <div class="question-grid-shell" id="question-grid-shell">
+        <div id="question-grid" class="question-grid hidden"></div>
+      </div>
+    </div>
+
+      <div id="question-area" class="card">
+        <div class="placeholder">
+          <p class="muted">Select a test to begin.</p>
+        </div>
+      </div>
+
+      <div id="summary-area" class="card hidden">
+        <h3>Session Summary</h3>
+        <p id="summary-score"></p>
+        <p id="summary-accuracy" class="muted"></p>
+        <p id="summary-note" class="muted hidden"></p>
+        <div id="summary-list"></div>
+        <p id="summary-time" class="muted"></p>
+        <div class="actions">
+          <button id="review-incorrect" class="primary">Review incorrect only</button>
+          <button id="show-all-explanations" class="secondary">Show explanations for all</button>
+          <button id="restart-test" class="secondary">Restart test</button>
+          <button id="back-to-tests" class="ghost">Pick another test</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="{{ url_for('static', filename='theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
