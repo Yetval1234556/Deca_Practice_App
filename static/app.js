@@ -23,7 +23,7 @@ const state = {
   lastResults: [],
   lastRequestedCount: 0,
   lastTimeLimitMinutes: 0,
-  questionGridCollapsed: false,
+  questionGridCollapsed: true,
 };
 
 const testListEl = document.getElementById("test-list");
@@ -306,6 +306,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.endedByTimer = false;
     state.resultsPersisted = false;
     state.lastResults = [];
+    state.questionGridCollapsed = true;
     startSessionTimer();
     activeTestName.textContent = state.activeTest.name;
     questionArea.classList.remove("hidden");
@@ -741,7 +742,7 @@ backToTestsBtn.addEventListener("click", () => {
   state.lastResults = [];
   state.lastRequestedCount = 0;
   state.lastTimeLimitMinutes = 0;
-  state.questionGridCollapsed = false;
+  state.questionGridCollapsed = true;
   summaryNote.classList.add("hidden");
   stopSessionTimer();
   updateTimerDisplay();
