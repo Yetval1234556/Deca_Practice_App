@@ -40,7 +40,6 @@ def _json_generic_error(exc: Exception):
 
 def _lines_from_pdf(path: Path, footer_hint: Optional[str] = None) -> List[str]:
     """Extract lines from a PDF while preserving order and trimming repeated footer noise."""
-
     def _looks_like_header_line(text: str) -> bool:
         patterns = [
             r"(?i)\bcluster\b",
@@ -53,12 +52,10 @@ def _lines_from_pdf(path: Path, footer_hint: Optional[str] = None) -> List[str]:
         ]
         if any(re.search(p, text) for p in patterns):
             return True
-        # Heuristic: shouty all-caps line longer than 3 words is likely a header
         tokens = text.split()
         if len(tokens) >= 4 and all(tok.isupper() or re.fullmatch(r"[A-Z0-9\-]+", tok) for tok in tokens):
             return True
         return False
-
     reader = PdfReader(str(path))
     lines: List[str] = []
     footer_tokens: List[str] = []
