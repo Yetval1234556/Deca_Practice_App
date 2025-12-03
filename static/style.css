@@ -216,6 +216,11 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   transition: width 0.2s ease;
 }
 
+.question-grid-shell {
+  width: 100%;
+  overflow: hidden;
+}
+
 .question-grid {
   display: flex;
   flex-wrap: nowrap;
@@ -226,6 +231,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   scroll-snap-type: x mandatory;
   width: 100%;
   max-width: 100%;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
 }
 
 .question-grid::-webkit-scrollbar { height: 8px; }
@@ -237,13 +244,17 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   height: 32px;
   border-radius: 8px;
   border: 1px solid rgba(12, 26, 70, 0.14);
-  background: #f6f8ff;
-  color: var(--text);
+  background: #e6f2ff;
+  color: #4c8dff;
   font-weight: 600;
   font-size: 13px;
   cursor: pointer;
   transition: transform 0.08s ease, border-color 0.12s ease, background 0.12s ease;
   scroll-snap-align: start;
+  flex: 0 0 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .qdot:hover { transform: translateY(-1px); border-color: rgba(76, 141, 255, 0.5); }
@@ -253,11 +264,11 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 .qdot.answered { background: #eef2ff; }
 .qdot:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
 
-[data-theme="dark"] .qdot { background: #1f2748; border-color: rgba(255, 255, 255, 0.08); color: #f4f6ff; }
-[data-theme="dark"] .qdot.active { background: rgba(108, 167, 255, 0.24); border-color: rgba(108, 167, 255, 0.8); }
-[data-theme="dark"] .qdot.correct { background: rgba(255, 155, 92, 0.24); border-color: rgba(255, 155, 92, 0.9); }
-[data-theme="dark"] .qdot.incorrect { background: rgba(255, 107, 129, 0.24); border-color: rgba(255, 107, 129, 0.9); }
-[data-theme="dark"] .qdot.answered { background: #273159; }
+[data-theme="dark"] .qdot { background: rgba(255, 155, 92, 0.18); border-color: rgba(255, 155, 92, 0.8); color: #ff9b5c; }
+[data-theme="dark"] .qdot.active { background: rgba(255, 155, 92, 0.28); border-color: rgba(255, 155, 92, 1); }
+[data-theme="dark"] .qdot.correct { background: rgba(255, 155, 92, 0.32); border-color: rgba(255, 155, 92, 1); color: #0b1026; }
+[data-theme="dark"] .qdot.incorrect { background: rgba(255, 107, 129, 0.26); border-color: rgba(255, 107, 129, 0.9); color: #0b1026; }
+[data-theme="dark"] .qdot.answered { background: rgba(255, 155, 92, 0.2); }
 
 .card {
   background: #ffffff;
