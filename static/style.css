@@ -199,6 +199,13 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 .active-test { font-size: 20px; font-weight: 600; }
 .score-block { text-align: right; }
 .timer-block { text-align: center; }
+.timer-block #timer-display {
+  font-weight: 700;
+  color: var(--accent-2);
+}
+[data-theme="dark"] .timer-block #timer-display {
+  color: var(--accent);
+}
 .timer-block button { margin-top: 6px; }
 
 .progress-shell {
@@ -383,6 +390,11 @@ button {
   border-radius: 10px;
   background: #f6f8ff;
   border: 1px solid rgba(12, 26, 70, 0.08);
+}
+[data-theme="dark"] .explanation {
+  background: rgba(255, 155, 92, 0.14);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: var(--text);
 }
 
 .hidden { display: none; }
