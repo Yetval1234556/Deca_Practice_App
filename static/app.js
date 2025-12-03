@@ -32,6 +32,7 @@ const summaryArea = document.getElementById("summary-area");
 const progressFill = document.getElementById("progress-fill");
 const activeTestName = document.getElementById("active-test-name");
 const scoreDisplay = document.getElementById("score-display");
+const questionGridShell = document.getElementById("question-grid-shell");
 const questionGrid = document.getElementById("question-grid");
 const restartBtn = document.getElementById("restart-test");
 const backToTestsBtn = document.getElementById("back-to-tests");
@@ -328,13 +329,13 @@ function goToQuestion(idx) {
 }
 
 function renderQuestionGrid() {
-  if (!questionGrid) return;
+  if (!questionGrid || !questionGridShell) return;
   if (!state.questions.length || state.sessionComplete) {
-    questionGrid.classList.add("hidden");
+    questionGridShell.classList.add("hidden");
     questionGrid.innerHTML = "";
     return;
   }
-  questionGrid.classList.remove("hidden");
+  questionGridShell.classList.remove("hidden");
   questionGrid.innerHTML = "";
   state.questions.forEach((q, idx) => {
     const status = state.answers[q.id] || {};
@@ -356,6 +357,39 @@ function renderQuestionGrid() {
       btn.addEventListener("click", () => goToQuestion(idx));
     }
     questionGrid.appendChild(btn);
+  });
+}
+
+function attachGridScrollHandlers() {
+  if (!questionGridShell) return;
+  let isDown = false;
+  let startX = 0;
+  let scrollLeft = 0;
+
+  questionGridShell.addEventListener("wheel", (e) => {
+    if (e.deltaY === 0) return;
+    questionGridShell.scrollLeft += e.deltaY;
+    e.preventDefault();
+  }, { passive: false });
+
+  questionGridShell.addEventListener("pointerdown", (e) => {
+    isDown = true;
+    startX = e.pageX - questionGridShell.offsetLeft;
+    scrollLeft = questionGridShell.scrollLeft;
+    questionGridShell.setPointerCapture(e.pointerId);
+  });
+  questionGridShell.addEventListener("pointermove", (e) => {
+    if (!isDown) return;
+    const x = e.pageX - questionGridShell.offsetLeft;
+    const walk = (x - startX);
+    questionGridShell.scrollLeft = scrollLeft - walk;
+  });
+  questionGridShell.addEventListener("pointerup", (e) => {
+    isDown = false;
+    questionGridShell.releasePointerCapture(e.pointerId);
+  });
+  questionGridShell.addEventListener("pointerleave", () => {
+    isDown = false;
   });
 }
 
@@ -697,3 +731,4 @@ backToTestsBtn.addEventListener("click", () => {
 
 // Kick off
 fetchTests();
+attachGridScrollHandlers();
