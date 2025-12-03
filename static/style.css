@@ -184,6 +184,33 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   transition: width 0.2s ease;
 }
 
+.question-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 6px 0 4px;
+}
+
+.qdot {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 1px solid rgba(12, 26, 70, 0.14);
+  background: #f6f8ff;
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  transition: transform 0.08s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.qdot:hover { transform: translateY(-1px); border-color: rgba(76, 141, 255, 0.5); }
+.qdot.active { background: rgba(76, 141, 255, 0.18); border-color: rgba(76, 141, 255, 0.8); }
+.qdot.correct { background: rgba(255, 122, 61, 0.2); border-color: rgba(255, 122, 61, 0.8); }
+.qdot.incorrect { background: rgba(230, 57, 70, 0.16); border-color: rgba(230, 57, 70, 0.75); }
+.qdot.answered { background: #eef2ff; }
+.qdot:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+
 .card {
   background: #ffffff;
   border: 1px solid rgba(12, 26, 70, 0.08);

@@ -32,6 +32,7 @@ const summaryArea = document.getElementById("summary-area");
 const progressFill = document.getElementById("progress-fill");
 const activeTestName = document.getElementById("active-test-name");
 const scoreDisplay = document.getElementById("score-display");
+const questionGrid = document.getElementById("question-grid");
 const restartBtn = document.getElementById("restart-test");
 const backToTestsBtn = document.getElementById("back-to-tests");
 const showAllExplanationsBtn = document.getElementById("show-all-explanations");
@@ -53,11 +54,13 @@ function updateScore() {
 }
 
 function updateProgress() {
-  if (!state.questions.length) {
+  const total = state.questions.length;
+  if (!total) {
     progressFill.style.width = "0%";
     return;
   }
-  const percent = Math.min(100, (state.currentIndex / state.questions.length) * 100);
+  const answered = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
+  const percent = Math.min(100, (answered / total) * 100);
   progressFill.style.width = `${percent}%`;
 }
 
@@ -316,9 +319,50 @@ function questionDone(questionId) {
   return Boolean(status && (status.correct !== undefined || status.revealed));
 }
 
+function goToQuestion(idx) {
+  if (state.sessionComplete || state.endedByTimer) return;
+  if (!state.questions[idx]) return;
+  recordCurrentQuestionTime();
+  state.currentIndex = idx;
+  renderQuestionCard();
+}
+
+function renderQuestionGrid() {
+  if (!questionGrid) return;
+  if (!state.questions.length || state.sessionComplete) {
+    questionGrid.classList.add("hidden");
+    questionGrid.innerHTML = "";
+    return;
+  }
+  questionGrid.classList.remove("hidden");
+  questionGrid.innerHTML = "";
+  state.questions.forEach((q, idx) => {
+    const status = state.answers[q.id] || {};
+    const btn = document.createElement("button");
+    btn.className = "qdot";
+    btn.textContent = q.number || idx + 1;
+    btn.title = `Question ${q.number || idx + 1}`;
+    if (idx === state.currentIndex) btn.classList.add("active");
+    if (status.correct === true) {
+      btn.classList.add("correct");
+    } else if (status.correct === false) {
+      btn.classList.add("incorrect");
+    } else if (status.choice !== undefined || status.revealed) {
+      btn.classList.add("answered");
+    }
+    if (state.endedByTimer) {
+      btn.disabled = true;
+    } else {
+      btn.addEventListener("click", () => goToQuestion(idx));
+    }
+    questionGrid.appendChild(btn);
+  });
+}
+
 function renderQuestionCard() {
   if (!state.activeTest || !state.questions.length) {
     questionArea.innerHTML = `<div class="placeholder"><p class="muted">Select a test to begin.</p></div>`;
+    renderQuestionGrid();
     return;
   }
 
@@ -401,6 +445,7 @@ function renderQuestionCard() {
   nextBtn.disabled = controlsDisabled || !answered;
   updateScore();
   updateProgress();
+  renderQuestionGrid();
 }
 
 async function handleAnswer(question, choiceIndex) {
@@ -468,12 +513,22 @@ async function nextQuestion() {
   recordCurrentQuestionTime();
   const currentQuestion = state.questions[state.currentIndex];
   if (!questionDone(currentQuestion.id)) return;
-  if (state.currentIndex >= state.questions.length - 1) {
+  const total = state.questions.length;
+  const answeredCount = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
+  if (answeredCount >= total) {
     await showSummary(state.showAllExplanations);
     progressFill.style.width = "100%";
     return;
   }
-  state.currentIndex += 1;
+  for (let step = 1; step <= total; step += 1) {
+    const idx = (state.currentIndex + step) % total;
+    if (!questionDone(state.questions[idx].id)) {
+      state.currentIndex = idx;
+      renderQuestionCard();
+      return;
+    }
+  }
+  state.currentIndex = (state.currentIndex + 1) % total;
   renderQuestionCard();
 }
 
@@ -508,6 +563,9 @@ async function showSummary(showAll = false) {
   }
   questionArea.classList.add("hidden");
   summaryArea.classList.remove("hidden");
+  if (questionGrid) {
+    questionGrid.classList.add("hidden");
+  }
   const summaryScore = document.getElementById("summary-score");
   const summaryAccuracy = document.getElementById("summary-accuracy");
   const summaryList = document.getElementById("summary-list");
@@ -628,6 +686,10 @@ backToTestsBtn.addEventListener("click", () => {
   activeTestName.textContent = "None selected";
   questionArea.classList.remove("hidden");
   summaryArea.classList.add("hidden");
+  if (questionGrid) {
+    questionGrid.classList.add("hidden");
+    questionGrid.innerHTML = "";
+  }
   renderQuestionCard();
   updateScore();
   updateProgress();
