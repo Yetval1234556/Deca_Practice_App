@@ -334,6 +334,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   border: 1px solid var(--panel-border);
   background: var(--control-bg);
   color: var(--text);
+  font-size: 14px;
+  width: 100%;
 }
 
 .small-label {

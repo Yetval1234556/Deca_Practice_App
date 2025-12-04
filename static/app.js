@@ -235,10 +235,16 @@ function renderTestList() {
           </select>
         </label>
         <label>
-          <span class="muted small-label">Time limit</span>
-          <select class="time-select" data-test-id="${test.id}">
-            ${timeOptions.map((opt) => `<option value="${opt.value}">${opt.label}</option>`).join("")}
-          </select>
+          <span class="muted small-label">Time limit (minutes)</span>
+          <input
+            class="time-select"
+            data-test-id="${test.id}"
+            type="number"
+            min="0"
+            step="1"
+            placeholder="e.g., 15"
+            inputmode="numeric"
+          >
         </label>
         <button class="primary" data-test-id="${test.id}">Start</button>
       </div>
@@ -248,7 +254,8 @@ function renderTestList() {
     const timeSelect = card.querySelector(".time-select");
     startBtn.addEventListener("click", () => {
       const count = Number(selectEl.value);
-      const timeLimit = Number(timeSelect.value);
+      const rawTime = Number(timeSelect.value);
+      const timeLimit = Number.isFinite(rawTime) && rawTime > 0 ? rawTime : 0;
       startTest(test.id, count, "regular", timeLimit);
     });
     testListEl.appendChild(card);
@@ -452,9 +459,10 @@ function renderQuestionCard() {
     </div>
     <div id="explanation" class="explanation ${status && status.revealed ? "" : "hidden"}"></div>
     <div class="actions">
+      <button id="prev-question" class="ghost" ${controlsDisabled ? "disabled" : ""}>Previous question</button>
+      <button id="next-question" class="primary" ${controlsDisabled ? "disabled" : ""}>${isLast ? "Finish" : "Next question"}</button>
       <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>Show correct answer</button>
       <button id="submit-quiz" class="ghost" ${controlsDisabled ? "disabled" : ""}>Submit & score</button>
-      <button id="next-question" class="primary" ${answered && !controlsDisabled ? "" : "disabled"}>${isLast ? "Finish" : "Next question"}</button>
     </div>
   `;
 
@@ -490,7 +498,10 @@ function renderQuestionCard() {
   });
   const nextBtn = document.getElementById("next-question");
   nextBtn.addEventListener("click", nextQuestion);
-  nextBtn.disabled = controlsDisabled || !answered;
+  nextBtn.disabled = controlsDisabled;
+  const prevBtn = document.getElementById("prev-question");
+  prevBtn.addEventListener("click", prevQuestion);
+  prevBtn.disabled = controlsDisabled;
   updateScore();
   updateProgress();
   renderQuestionGrid();
@@ -560,7 +571,6 @@ async function nextQuestion() {
   if (state.sessionComplete || state.endedByTimer) return;
   recordCurrentQuestionTime();
   const currentQuestion = state.questions[state.currentIndex];
-  if (!questionDone(currentQuestion.id)) return;
   const total = state.questions.length;
   const answeredCount = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
   if (answeredCount >= total) {
@@ -577,6 +587,14 @@ async function nextQuestion() {
     }
   }
   state.currentIndex = (state.currentIndex + 1) % total;
+  renderQuestionCard();
+}
+
+function prevQuestion() {
+  if (state.sessionComplete || state.endedByTimer) return;
+  recordCurrentQuestionTime();
+  const total = state.questions.length;
+  state.currentIndex = (state.currentIndex - 1 + total) % total;
   renderQuestionCard();
 }
 
