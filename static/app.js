@@ -29,6 +29,13 @@ const state = {
 
 const RANDOM_KEY = "deca-random-order";
 
+function parseDefaultRandom() {
+  if (typeof window !== "undefined" && typeof window.DEFAULT_RANDOM_ORDER !== "undefined") {
+    return String(window.DEFAULT_RANDOM_ORDER).toLowerCase() === "true";
+  }
+  return false;
+}
+
 const testListEl = document.getElementById("test-list");
 const reloadBtn = document.getElementById("reload-tests");
 const questionArea = document.getElementById("question-area");
@@ -56,10 +63,13 @@ function escapeHtml(str) {
 }
 
 function isRandomOrderEnabled() {
+  const fallback = parseDefaultRandom();
   try {
-    return localStorage.getItem(RANDOM_KEY) === "true";
+    const stored = localStorage.getItem(RANDOM_KEY);
+    if (stored === null) return fallback;
+    return stored === "true";
   } catch (err) {
-    return false;
+    return fallback;
   }
 }
 

@@ -10,6 +10,9 @@ from werkzeug.exceptions import HTTPException
 
 BASE_DIR = Path(__file__).parent.resolve()
 TESTS_DIR = BASE_DIR / "tests"
+MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
+MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
+DEFAULT_RANDOM_ORDER = os.getenv("DEFAULT_RANDOM_ORDER", "false").lower() in {"1", "true", "yes", "on"}
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 
@@ -486,13 +489,13 @@ def _select_questions_for_mode(
             return []
         questions = [q for q in questions if q["id"] in missed_ids]
     if count and count > 0:
-        questions = questions[: min(count, len(questions))]
+        questions = questions[: min(count, len(questions), MAX_QUESTIONS_PER_RUN)]
     return [_serialize_question_payload(q) for q in questions]
 
 
 @app.route("/")
 def home():
-    return render_template("index.html")
+    return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
 
 @app.route("/settings")
@@ -503,15 +506,16 @@ def settings():
 @app.route("/api/tests")
 def list_tests():
     tests = load_all_tests()
-    payload = [
-        {
-            "id": test["id"],
-            "name": test["name"],
-            "description": test.get("description", ""),
-            "question_count": len(test["questions"]),
-        }
-        for test in tests.values()
-    ]
+    payload = []
+    for test in tests.values():
+        payload.append(
+            {
+                "id": test["id"],
+                "name": test["name"],
+                "description": test.get("description", ""),
+                "question_count": len(test["questions"]),
+            }
+        )
     return jsonify(payload)
 
 
@@ -524,7 +528,7 @@ def get_questions(test_id: str):
         try:
             desired = int(count_param)
             if desired > 0:
-                desired = min(desired, len(questions))
+                desired = min(desired, len(questions), MAX_QUESTIONS_PER_RUN)
                 questions = questions[:desired]
         except ValueError:
             pass
@@ -561,6 +565,9 @@ def start_quiz(test_id: str):
         time_limit_seconds = int(payload.get("time_limit_seconds", 0))
         if time_limit_seconds < 0:
             time_limit_seconds = 0
+        max_seconds = max(0, MAX_TIME_LIMIT_MINUTES * 60)
+        if max_seconds:
+            time_limit_seconds = min(time_limit_seconds, max_seconds)
     except (TypeError, ValueError):
         time_limit_seconds = 0
     return jsonify(
@@ -636,6 +643,11 @@ def reveal_answer(test_id: str, question_id: str):
             "explanation": question.get("explanation", ""),
         }
     )
+
+
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
 
 
 if __name__ == "__main__":

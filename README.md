@@ -51,6 +51,11 @@
 ## Deploying/serving
 - Local: `python3 app.py` (honors `HOST`/`PORT` env vars; default 0.0.0.0:8080).
 - Production-style: `gunicorn app:app` (add `--bind 0.0.0.0:8080` as needed).
+- Health check: `GET /health` returns `{"status":"ok"}` for container readiness.
+- Environment toggles:
+  - `DEFAULT_RANDOM_ORDER` (`true`/`false`): shuffle questions by default unless the user overrides in Settings.
+  - `MAX_QUESTIONS_PER_RUN` (int, default 100): clamp how many questions can be requested.
+  - `MAX_TIME_LIMIT_MINUTES` (int, default 180): maximum allowed time limit for a session.
 
 ## Docker
 Build and run with Docker:
@@ -63,6 +68,13 @@ Build and run with Docker:
    docker run --rm -p 8080:8080 deca-practice
    ```
    Use `-v "$(pwd)/tests:/app/tests"` to mount your PDFs without rebuilding.
+
+## Tests
+Install test dependencies and run pytest:
+```bash
+python3 -m pip install -r requirements-dev.txt
+pytest
+```
 
 ## Tips for reliable parsing
 - Keep question numbers at the start of a line like `12) Question text` or `12. Question text`.

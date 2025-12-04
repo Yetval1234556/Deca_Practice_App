@@ -18,6 +18,9 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
+  <script>
+    window.DEFAULT_RANDOM_ORDER = {{ "true" if default_random_order else "false" }};
+  </script>
   <div class="bg-grid"></div>
   <header class="topbar">
     <div>

@@ -41,10 +41,16 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   function getRandomPref() {
+    const fallback =
+      typeof window !== "undefined" && typeof window.DEFAULT_RANDOM_ORDER !== "undefined"
+        ? String(window.DEFAULT_RANDOM_ORDER).toLowerCase() === "true"
+        : false;
     try {
-      return localStorage.getItem(RANDOM_KEY) === "true";
+      const stored = localStorage.getItem(RANDOM_KEY);
+      if (stored === null) return fallback;
+      return stored === "true";
     } catch (err) {
-      return false;
+      return fallback;
     }
   }
 
