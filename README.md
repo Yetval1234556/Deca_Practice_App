@@ -52,6 +52,18 @@
 - Local: `python3 app.py` (honors `HOST`/`PORT` env vars; default 0.0.0.0:8080).
 - Production-style: `gunicorn app:app` (add `--bind 0.0.0.0:8080` as needed).
 
+## Docker
+Build and run with Docker:
+1. Build the image:
+   ```bash
+   docker build -t deca-practice .
+   ```
+2. Run it (maps port 8080):
+   ```bash
+   docker run --rm -p 8080:8080 deca-practice
+   ```
+   Use `-v "$(pwd)/tests:/app/tests"` to mount your PDFs without rebuilding.
+
 ## Tips for reliable parsing
 - Keep question numbers at the start of a line like `12) Question text` or `12. Question text`.
 - Label options with leading letters: `A)`, `B.`, `C -`, etc. Multi-line option text is appended to the previous option.
