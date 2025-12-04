@@ -500,7 +500,7 @@ def home():
 
 @app.route("/settings")
 def settings():
-    return render_template("settings.html")
+    return render_template("settings.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
 
 @app.route("/api/tests")
