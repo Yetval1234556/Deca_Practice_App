@@ -2,8 +2,10 @@ document.addEventListener("DOMContentLoaded", () => {
   if (window.Theme && typeof window.Theme.init === "function") {
     window.Theme.init();
   }
+  const RANDOM_KEY = "deca-random-order";
   const label = document.getElementById("theme-label");
   const themeButtons = Array.from(document.querySelectorAll("[data-theme-option]"));
+  const randomToggle = document.getElementById("random-order-toggle");
   const prettyNames = {
     light: "Light",
     dark: "Dark",
@@ -37,4 +39,38 @@ document.addEventListener("DOMContentLoaded", () => {
       updateLabel(nextTheme);
     });
   });
+
+  function getRandomPref() {
+    try {
+      return localStorage.getItem(RANDOM_KEY) === "true";
+    } catch (err) {
+      return false;
+    }
+  }
+
+  function setRandomPref(value) {
+    try {
+      localStorage.setItem(RANDOM_KEY, value ? "true" : "false");
+    } catch (err) {
+      // ignore
+    }
+  }
+
+  function updateRandomToggle() {
+    const enabled = getRandomPref();
+    if (randomToggle) {
+      randomToggle.textContent = enabled ? "Enabled" : "Disabled";
+      randomToggle.classList.toggle("active", enabled);
+      randomToggle.ariaPressed = enabled ? "true" : "false";
+    }
+  }
+
+  if (randomToggle) {
+    randomToggle.addEventListener("click", () => {
+      const next = !getRandomPref();
+      setRandomPref(next);
+      updateRandomToggle();
+    });
+    updateRandomToggle();
+  }
 });

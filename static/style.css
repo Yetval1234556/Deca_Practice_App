@@ -457,7 +457,8 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 }
 
 .question-text {
-  font-size: 20px;
+  font-size: 22px;
+  font-weight: 700;
   line-height: 1.4;
   margin: 10px 0 16px;
   color: var(--question-text);
@@ -507,6 +508,7 @@ button {
 .ghost { background: transparent; color: var(--text); border: 1px solid var(--panel-border); }
 .danger { background: var(--danger); color: #ffffff; }
 .small-btn { padding: 6px 10px; font-size: 13px; }
+.secondary.active { border-color: var(--accent); box-shadow: 0 0 0 1px rgba(255, 122, 61, 0.25); }
 
 .feedback {
   margin-top: 10px;

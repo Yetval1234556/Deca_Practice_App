@@ -24,7 +24,10 @@ const state = {
   lastRequestedCount: 0,
   lastTimeLimitMinutes: 0,
   questionGridCollapsed: true,
+  randomOrderEnabled: false,
 };
+
+const RANDOM_KEY = "deca-random-order";
 
 const testListEl = document.getElementById("test-list");
 const reloadBtn = document.getElementById("reload-tests");
@@ -50,6 +53,23 @@ function escapeHtml(str) {
     const chars = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
     return chars[tag] || tag;
   });
+}
+
+function isRandomOrderEnabled() {
+  try {
+    return localStorage.getItem(RANDOM_KEY) === "true";
+  } catch (err) {
+    return false;
+  }
+}
+
+function shuffleQuestions(list) {
+  const arr = [...list];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
 }
 
 function updateScore() {
@@ -298,7 +318,8 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     }
     state.activeTest = data.test;
     state.mode = data.mode || mode || "regular";
-    state.questions = data.questions || [];
+    state.randomOrderEnabled = isRandomOrderEnabled();
+    state.questions = state.randomOrderEnabled ? shuffleQuestions(data.questions || []) : data.questions || [];
     if (!state.questions.length) throw new Error("No questions returned for this session.");
     state.currentIndex = 0;
     state.score = 0;
@@ -365,13 +386,23 @@ function renderQuestionGrid() {
   questionGridShell.classList.toggle("hidden", state.questionGridCollapsed);
   questionGrid.classList.toggle("hidden", state.questionGridCollapsed);
   questionGrid.innerHTML = "";
-  state.questions.forEach((q, idx) => {
+  const idToIndex = new Map(state.questions.map((q, i) => [q.id, i]));
+  const sortedByNumber = [...state.questions].sort((a, b) => {
+    const aNum = Number.isFinite(a.number) ? a.number : idToIndex.get(a.id) + 1;
+    const bNum = Number.isFinite(b.number) ? b.number : idToIndex.get(b.id) + 1;
+    return aNum - bNum;
+  });
+  const activeId = state.questions[state.currentIndex]?.id;
+
+  sortedByNumber.forEach((q) => {
+    const idx = idToIndex.get(q.id);
     const status = state.answers[q.id] || {};
     const btn = document.createElement("button");
     btn.className = "qdot";
-    btn.textContent = q.number || idx + 1;
-    btn.title = `Question ${q.number || idx + 1}`;
-    if (idx === state.currentIndex) btn.classList.add("active");
+    const label = Number.isFinite(q.number) ? q.number : idx + 1;
+    btn.textContent = label;
+    btn.title = `Question ${label}`;
+    if (q.id === activeId) btn.classList.add("active");
     if (status.correct === true) {
       btn.classList.add("correct");
     } else if (status.correct === false) {
@@ -422,6 +453,7 @@ function renderQuestionCard() {
   const answered = questionDone(question.id);
   const modeLabel = state.mode === "review_incorrect" ? "Review missed" : "Practice";
   const limitLabel = state.timeLimitMs ? `${Math.round(state.timeLimitMs / 60000)}m limit` : "Untimed";
+  const orderLabel = state.randomOrderEnabled ? "Random order" : "In order";
   const disableOptions = state.sessionComplete || state.endedByTimer || (status && status.choice !== undefined);
   const controlsDisabled = state.sessionComplete || state.endedByTimer;
   const feedbackText = status
@@ -441,7 +473,7 @@ function renderQuestionCard() {
       </div>
       <div class="pill">
         <span class="dot"></span>
-        <span>${escapeHtml(state.activeTest.name)} · ${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length} • ${modeLabel}${state.timeLimitMs ? ` • ${limitLabel}` : ""}</span>
+        <span>${escapeHtml(state.activeTest.name)} · ${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length} • ${modeLabel} • ${orderLabel}${state.timeLimitMs ? ` • ${limitLabel}` : ""}</span>
       </div>
     </div>
     <div class="options">
