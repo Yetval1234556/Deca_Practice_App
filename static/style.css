@@ -338,6 +338,23 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
   width: 100%;
 }
 
+.time-input-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.time-input-row .time-select {
+  flex: 1;
+}
+
+.microcopy {
+  display: block;
+  font-size: 12px;
+  margin-top: 6px;
+  color: var(--muted);
+}
+
 .small-label {
   display: block;
   font-size: 12px;
@@ -451,9 +468,9 @@ code { background: rgba(255, 255, 255, 0.06); padding: 2px 6px; border-radius: 6
 
 .question-head {
   display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
 }
 
 .question-text {
@@ -550,6 +567,39 @@ button {
 }
 
 #summary-note { margin-top: 6px; }
+
+.session-footer {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--muted-surface);
+  border: 1px solid var(--muted-surface-strong);
+  box-shadow: var(--shadow);
+  margin-top: 8px;
+}
+
+.session-footer__title {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.session-footer__meta {
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.session-footer__progress {
+  margin-left: auto;
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+}
 
 /* Settings page */
 .settings-body { padding: 24px; }
