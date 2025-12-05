@@ -1,3 +1,5 @@
+const SESSION_KEY = "deca-active-session-v1";
+const DEFAULT_TIME_LIMIT_MINUTES = 90;
 const state = {
   tests: [],
   activeTest: null,
@@ -22,7 +24,7 @@ const state = {
   resultsPersisted: false,
   lastResults: [],
   lastRequestedCount: 0,
-  lastTimeLimitMinutes: 0,
+  lastTimeLimitMinutes: DEFAULT_TIME_LIMIT_MINUTES,
   questionGridCollapsed: true,
   randomOrderEnabled: false,
 };
@@ -54,6 +56,7 @@ const timerDisplay = document.getElementById("timer-display");
 const toggleTimerBtn = document.getElementById("toggle-timer");
 const reviewIncorrectBtn = document.getElementById("review-incorrect");
 const summaryNote = document.getElementById("summary-note");
+const sessionFooter = document.getElementById("session-footer");
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (tag) => {
@@ -82,6 +85,67 @@ function shuffleQuestions(list) {
   return arr;
 }
 
+function persistSession() {
+  if (typeof localStorage === "undefined") return;
+  if (!state.activeTest || !state.questions.length) {
+    try {
+      localStorage.removeItem(SESSION_KEY);
+    } catch (err) {
+      // ignore storage errors
+    }
+    return;
+  }
+  const payload = {
+    activeTest: state.activeTest,
+    questions: state.questions,
+    currentIndex: state.currentIndex,
+    score: state.score,
+    answers: state.answers,
+    selectedCount: state.selectedCount,
+    totalAvailable: state.totalAvailable,
+    showAllExplanations: state.showAllExplanations,
+    sessionStart: state.sessionStart,
+    questionStart: state.questionStart,
+    totalElapsedMs: state.totalElapsedMs,
+    perQuestionMs: state.perQuestionMs,
+    timerHidden: state.timerHidden,
+    timeLimitMs: state.timeLimitMs,
+    timeRemainingMs: state.timeRemainingMs,
+    mode: state.mode,
+    sessionComplete: state.sessionComplete,
+    endedByTimer: state.endedByTimer,
+    resultsPersisted: state.resultsPersisted,
+    lastResults: state.lastResults,
+    lastRequestedCount: state.lastRequestedCount,
+    lastTimeLimitMinutes: state.lastTimeLimitMinutes,
+    questionGridCollapsed: state.questionGridCollapsed,
+    randomOrderEnabled: state.randomOrderEnabled,
+  };
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  } catch (err) {
+    // ignore storage errors
+  }
+}
+
+function clearPersistedSession() {
+  try {
+    localStorage.removeItem(SESSION_KEY);
+  } catch (err) {
+    // ignore
+  }
+}
+
+function recomputeScoreFromAnswers() {
+  state.score = state.questions.reduce((acc, q) => {
+    const status = state.answers[q.id];
+    if (status && status.correct === true) {
+      return acc + 1;
+    }
+    return acc;
+  }, 0);
+}
+
 function updateScore() {
   const total = state.selectedCount || state.questions.length || 0;
   scoreDisplay.textContent = `${state.score} / ${total}`;
@@ -91,11 +155,34 @@ function updateProgress() {
   const total = state.questions.length;
   if (!total) {
     progressFill.style.width = "0%";
+    updateSessionMeta();
     return;
   }
   const answered = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
   const percent = Math.min(100, (answered / total) * 100);
   progressFill.style.width = `${percent}%`;
+  updateSessionMeta();
+}
+
+function updateSessionMeta() {
+  if (!sessionFooter) return;
+  if (!state.activeTest || !state.questions.length) {
+    sessionFooter.classList.add("hidden");
+    sessionFooter.innerHTML = `<span class="muted">No test in progress.</span>`;
+    return;
+  }
+  const answered = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
+  const modeLabel = state.mode === "review_incorrect" ? "Review missed" : "Practice";
+  const orderLabel = state.randomOrderEnabled ? "Random order" : "In order";
+  const limitLabel = `${Math.round(state.timeLimitMs / 60000)}m limit`;
+  const countLabel = `${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length}`;
+  const statusLabel = state.endedByTimer ? "Timed out" : state.sessionComplete ? "Finished" : "In progress";
+  sessionFooter.classList.remove("hidden");
+  sessionFooter.innerHTML = `
+    <div class="session-footer__title">${escapeHtml(state.activeTest.name)}</div>
+    <div class="session-footer__meta">${countLabel} • ${modeLabel} • ${orderLabel} • ${limitLabel} • ${statusLabel}</div>
+    <div class="session-footer__progress">Answered ${answered}/${state.questions.length}</div>
+  `;
 }
 
 function formatMs(ms) {
@@ -108,16 +195,23 @@ function formatMs(ms) {
 }
 
 function updateTimerDisplay() {
+  if (toggleTimerBtn) {
+    toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
+  }
   if (state.timerHidden) {
     timerDisplay.textContent = "— —";
     return;
   }
   if (!state.sessionStart) {
-    const base = state.timeLimitMs ? formatMs(state.timeLimitMs) : "00:00";
-    timerDisplay.textContent = state.timeLimitMs ? `${base} left` : base;
+    if (state.sessionComplete && state.totalElapsedMs) {
+      timerDisplay.textContent = formatMs(state.totalElapsedMs);
+      return;
+    }
+    const base = formatMs(state.timeLimitMs || DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000);
+    timerDisplay.textContent = `${base} left`;
     return;
   }
-  const elapsed = Date.now() - state.sessionStart;
+  const elapsed = Math.max(0, Date.now() - state.sessionStart);
   state.totalElapsedMs = elapsed;
   if (state.timeLimitMs) {
     const remaining = Math.max(state.timeLimitMs - elapsed, 0);
@@ -128,13 +222,25 @@ function updateTimerDisplay() {
   }
 }
 
-function startSessionTimer() {
+function startSessionTimer(startedAt) {
   clearInterval(state.timerInterval);
-  state.sessionStart = Date.now();
-  state.totalElapsedMs = 0;
-  state.timeRemainingMs = state.timeLimitMs || 0;
+  if (!state.timeLimitMs || state.timeLimitMs <= 0) {
+    state.timeLimitMs = DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000;
+    state.timeRemainingMs = state.timeLimitMs;
+  }
+  const startStamp = startedAt || Date.now();
+  state.sessionStart = startStamp;
+  const elapsed = Math.max(0, Date.now() - startStamp);
+  state.totalElapsedMs = elapsed;
+  state.timeRemainingMs = state.timeLimitMs ? Math.max(state.timeLimitMs - elapsed, 0) : 0;
   updateTimerDisplay();
+  if (state.timeLimitMs && state.timeRemainingMs <= 0) {
+    handleTimeExpiry().catch((err) => console.error(err));
+    persistSession();
+    return;
+  }
   state.timerInterval = setInterval(tickSessionTimer, 500);
+  persistSession();
 }
 
 function stopSessionTimer() {
@@ -145,12 +251,14 @@ function stopSessionTimer() {
   state.timerInterval = null;
   state.sessionStart = null;
   state.questionStart = null;
+  persistSession();
 }
 
 function toggleTimer() {
   state.timerHidden = !state.timerHidden;
   toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
   updateTimerDisplay();
+  persistSession();
 }
 
 function tickSessionTimer() {
@@ -178,10 +286,15 @@ async function handleTimeExpiry() {
   state.timeRemainingMs = 0;
   updateTimerDisplay();
   await showSummary(state.showAllExplanations);
+  updateSessionMeta();
+  persistSession();
 }
 
 function startQuestionTimer() {
-  state.questionStart = Date.now();
+  if (!state.questionStart) {
+    state.questionStart = Date.now();
+    persistSession();
+  }
 }
 
 function recordCurrentQuestionTime() {
@@ -190,6 +303,7 @@ function recordCurrentQuestionTime() {
   const elapsed = Date.now() - state.questionStart;
   state.perQuestionMs[qid] = (state.perQuestionMs[qid] || 0) + elapsed;
   state.questionStart = null;
+  persistSession();
 }
 
 async function ensureAnswerDetails(question) {
@@ -212,6 +326,82 @@ async function ensureAnswerDetails(question) {
   return merged;
 }
 
+function restoreSessionFromStorage() {
+  let raw;
+  try {
+    raw = localStorage.getItem(SESSION_KEY);
+  } catch (err) {
+    return false;
+  }
+  if (!raw) return false;
+  let data = null;
+  try {
+    data = JSON.parse(raw);
+  } catch (err) {
+    return false;
+  }
+  if (!data || !data.activeTest || !Array.isArray(data.questions) || !data.questions.length) {
+    return false;
+  }
+  state.activeTest = data.activeTest;
+  state.questions = data.questions;
+  state.currentIndex = Number.isFinite(data.currentIndex) ? data.currentIndex : 0;
+  if (state.currentIndex < 0 || state.currentIndex >= state.questions.length) {
+    state.currentIndex = 0;
+  }
+  state.answers = data.answers || {};
+  state.selectedCount = data.selectedCount || data.questions.length;
+  state.totalAvailable = data.totalAvailable || data.questions.length;
+  state.showAllExplanations = Boolean(data.showAllExplanations);
+  state.sessionStart = data.sessionStart || null;
+  state.questionStart = data.questionStart || null;
+  state.totalElapsedMs = data.totalElapsedMs || 0;
+  state.perQuestionMs = data.perQuestionMs || {};
+  state.timerHidden = Boolean(data.timerHidden);
+  state.timeLimitMs = typeof data.timeLimitMs === "number" ? data.timeLimitMs : 0;
+  state.timeRemainingMs = typeof data.timeRemainingMs === "number" ? data.timeRemainingMs : 0;
+  state.mode = data.mode || "regular";
+  state.sessionComplete = Boolean(data.sessionComplete);
+  state.endedByTimer = Boolean(data.endedByTimer);
+  state.resultsPersisted = Boolean(data.resultsPersisted);
+  state.lastResults = data.lastResults || [];
+  state.lastRequestedCount = typeof data.lastRequestedCount === "number" ? data.lastRequestedCount : 0;
+  state.lastTimeLimitMinutes =
+    typeof data.lastTimeLimitMinutes === "number" ? data.lastTimeLimitMinutes : DEFAULT_TIME_LIMIT_MINUTES;
+  if (!state.timeLimitMs || state.timeLimitMs <= 0) {
+    state.timeLimitMs = DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000;
+    state.timeRemainingMs = state.timeLimitMs;
+  }
+  if (!state.lastTimeLimitMinutes || state.lastTimeLimitMinutes <= 0) {
+    state.lastTimeLimitMinutes = DEFAULT_TIME_LIMIT_MINUTES;
+  }
+  state.questionGridCollapsed = data.questionGridCollapsed !== undefined ? data.questionGridCollapsed : true;
+  state.randomOrderEnabled =
+    data.randomOrderEnabled !== undefined ? data.randomOrderEnabled : isRandomOrderEnabled();
+  recomputeScoreFromAnswers();
+  activeTestName.textContent = state.activeTest.name || "Active test";
+
+  const elapsedNow = state.sessionStart ? Math.max(0, Date.now() - state.sessionStart) : 0;
+  if (state.timeLimitMs && state.sessionStart) {
+    state.timeRemainingMs = Math.max(state.timeLimitMs - elapsedNow, 0);
+  }
+
+  if (state.sessionComplete || state.endedByTimer) {
+    showSummary(state.showAllExplanations).catch((err) => console.error(err));
+  } else {
+    questionArea.classList.remove("hidden");
+    summaryArea.classList.add("hidden");
+    startSessionTimer(state.sessionStart || Date.now());
+    renderQuestionCard();
+  }
+  updateScore();
+  updateProgress();
+  renderQuestionGrid();
+  updateSessionMeta();
+  updateTimerDisplay();
+  return true;
+}
+
 async function fetchTests() {
   testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
   try {
@@ -223,6 +413,16 @@ async function fetchTests() {
   } catch (err) {
     testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
   }
+}
+
+function normalizeTimeLimitInput(value) {
+  const raw = (value || "").toString().trim();
+  if (!raw) return { minutes: DEFAULT_TIME_LIMIT_MINUTES, display: `${DEFAULT_TIME_LIMIT_MINUTES}` };
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return { minutes: DEFAULT_TIME_LIMIT_MINUTES, display: `${DEFAULT_TIME_LIMIT_MINUTES}` };
+  }
+  return { minutes: parsed, display: `${parsed}` };
 }
 
 function renderTestList() {
@@ -241,14 +441,6 @@ function renderTestList() {
       { label: "50", value: 50 },
       { label: "100", value: 100 },
     ].filter((opt) => opt.value === 0 || opt.value <= test.question_count);
-    const timeOptions = [
-      { label: "No limit", value: 0 },
-      { label: "5 min", value: 5 },
-      { label: "10 min", value: 10 },
-      { label: "15 min", value: 15 },
-      { label: "20 min", value: 20 },
-      { label: "30 min", value: 30 },
-    ];
     card.innerHTML = `
       <div class="test-meta">
         <h4>${escapeHtml(test.name)}</h4>
@@ -266,15 +458,17 @@ function renderTestList() {
         </label>
         <label>
           <span class="muted small-label">Time limit (minutes)</span>
-          <input
-            class="time-select"
-            data-test-id="${test.id}"
-            type="number"
-            min="0"
-            step="1"
-            placeholder="e.g., 15"
-            inputmode="numeric"
-          >
+          <div class="time-input-row">
+            <input
+              class="time-select"
+              data-test-id="${test.id}"
+              type="text"
+              inputmode="text"
+              value="${DEFAULT_TIME_LIMIT_MINUTES}"
+              spellcheck="false"
+            >
+          </div>
+          <span class="muted microcopy">Default is 90 minutes. Leave blank to use the default.</span>
         </label>
         <button class="primary" data-test-id="${test.id}">Start</button>
       </div>
@@ -282,11 +476,17 @@ function renderTestList() {
     const startBtn = card.querySelector("button");
     const selectEl = card.querySelector(".count-select");
     const timeSelect = card.querySelector(".time-select");
+    const preferredMinutes =
+      state.activeTest && state.activeTest.id === test.id
+        ? state.lastTimeLimitMinutes
+        : DEFAULT_TIME_LIMIT_MINUTES;
+    if (timeSelect) {
+      timeSelect.value = preferredMinutes > 0 ? preferredMinutes : DEFAULT_TIME_LIMIT_MINUTES;
+    }
     startBtn.addEventListener("click", () => {
       const count = Number(selectEl.value);
-      const rawTime = Number(timeSelect.value);
-      const timeLimit = Number.isFinite(rawTime) && rawTime > 0 ? rawTime : 0;
-      startTest(test.id, count, "regular", timeLimit);
+      const parsed = normalizeTimeLimitInput(timeSelect.value);
+      startTest(test.id, count, "regular", parsed.minutes);
     });
     testListEl.appendChild(card);
   });
@@ -295,13 +495,18 @@ function renderTestList() {
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
   if (!testId) return;
   state.lastRequestedCount = count;
-  state.lastTimeLimitMinutes = timeLimitMinutes;
+  const normalizedMinutes =
+    typeof timeLimitMinutes === "number" && timeLimitMinutes >= 0
+      ? timeLimitMinutes
+      : DEFAULT_TIME_LIMIT_MINUTES;
+  const enforcedMinutes = normalizedMinutes > 0 ? normalizedMinutes : DEFAULT_TIME_LIMIT_MINUTES;
+  state.lastTimeLimitMinutes = enforcedMinutes;
   state.mode = mode;
   try {
     const payload = {
       count: count > 0 ? count : undefined,
       mode,
-      time_limit_seconds: timeLimitMinutes > 0 ? timeLimitMinutes * 60 : 0,
+      time_limit_seconds: enforcedMinutes * 60,
     };
     const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
       method: "POST",
@@ -338,13 +543,18 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.totalAvailable = data.test?.total || state.questions.length;
     state.showAllExplanations = false;
     state.perQuestionMs = {};
-    state.timeLimitMs = (data.time_limit_seconds || 0) * 1000;
+    const resolvedLimitSeconds = data.time_limit_seconds || enforcedMinutes * 60;
+    const safeLimitMs = Math.max(1000, resolvedLimitSeconds * 1000);
+    state.timeLimitMs = safeLimitMs;
     state.timeRemainingMs = state.timeLimitMs;
+    state.totalElapsedMs = 0;
+    state.questionStart = null;
     state.sessionComplete = false;
     state.endedByTimer = false;
     state.resultsPersisted = false;
     state.lastResults = [];
     state.questionGridCollapsed = true;
+    state.timerHidden = state.timerHidden || false;
     startSessionTimer();
     activeTestName.textContent = state.activeTest.name;
     questionArea.classList.remove("hidden");
@@ -352,6 +562,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     renderQuestionCard();
     updateScore();
     updateProgress();
+    updateSessionMeta();
   } catch (err) {
     questionArea.innerHTML = `<div class="placeholder"><p class="muted">${escapeHtml(err.message || "Unable to load test")}</p></div>`;
   }
@@ -359,7 +570,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
 
 function questionDone(questionId) {
   const status = state.answers[questionId];
-  return Boolean(status && (status.correct !== undefined || status.revealed));
+  return Boolean(status && (status.correct !== undefined || status.revealed || status.choice !== undefined));
 }
 
 function goToQuestion(idx) {
@@ -447,6 +658,7 @@ function scrollActiveQuestionIntoView() {
 function toggleQuestionGrid() {
   state.questionGridCollapsed = !state.questionGridCollapsed;
   renderQuestionGrid();
+  persistSession();
 }
 
 function renderQuestionCard() {
@@ -460,19 +672,15 @@ function renderQuestionCard() {
   startQuestionTimer();
   const question = state.questions[state.currentIndex];
   const status = state.answers[question.id];
-  const answered = questionDone(question.id);
-  const modeLabel = state.mode === "review_incorrect" ? "Review missed" : "Practice";
-  const limitLabel = state.timeLimitMs ? `${Math.round(state.timeLimitMs / 60000)}m limit` : "Untimed";
-  const orderLabel = state.randomOrderEnabled ? "Random order" : "In order";
-  const disableOptions = state.sessionComplete || state.endedByTimer || (status && status.choice !== undefined);
+  const disableOptions = state.sessionComplete || state.endedByTimer;
   const controlsDisabled = state.sessionComplete || state.endedByTimer;
   const feedbackText = status
     ? status.correct
-      ? "Correct!"
+      ? "Correct! Change your answer anytime to re-check."
       : status.correct === false
-        ? "Incorrect"
+        ? "Incorrect — adjust your pick to try again."
         : "Answer revealed"
-    : "Pick an answer to get instant feedback.";
+    : "Pick or change an answer to get instant feedback.";
 
   const isLast = state.currentIndex === state.questions.length - 1;
   questionArea.innerHTML = `
@@ -480,10 +688,6 @@ function renderQuestionCard() {
       <div>
         <p class="eyebrow">Question ${state.currentIndex + 1} of ${state.questions.length}${question.number ? ` • #${question.number}` : ""}</p>
         <div class="question-text">${escapeHtml(question.question)}</div>
-      </div>
-      <div class="pill">
-        <span class="dot"></span>
-        <span>${escapeHtml(state.activeTest.name)} · ${state.selectedCount || state.questions.length}/${state.totalAvailable || state.questions.length} • ${modeLabel} • ${orderLabel}${state.timeLimitMs ? ` • ${limitLabel}` : ""}</span>
       </div>
     </div>
     <div class="options">
@@ -547,12 +751,11 @@ function renderQuestionCard() {
   updateScore();
   updateProgress();
   renderQuestionGrid();
+  persistSession();
 }
 
 async function handleAnswer(question, choiceIndex) {
   if (state.sessionComplete || state.endedByTimer) return;
-  const existing = state.answers[question.id];
-  if (existing && existing.choice !== undefined) return;
   recordCurrentQuestionTime();
   try {
     const res = await fetch(
@@ -565,18 +768,19 @@ async function handleAnswer(question, choiceIndex) {
     );
     if (!res.ok) throw new Error("Unable to submit answer");
     const data = await res.json();
-    const wasCounted = Boolean(existing && existing.choice !== undefined);
-    state.answers[question.id] = { ...(existing || {}), choice: choiceIndex, correct: data.correct };
-    if (data.correct && !wasCounted) {
-      state.score += 1;
-    }
+    const existing = state.answers[question.id] || {};
+    state.answers[question.id] = { ...existing, choice: choiceIndex, correct: data.correct };
+    recomputeScoreFromAnswers();
     renderQuestionCard();
+    persistSession();
   } catch (err) {
     const feedbackEl = document.getElementById("feedback");
     if (feedbackEl) {
       feedbackEl.textContent = err.message;
       feedbackEl.classList.remove("correct", "incorrect");
     }
+    startQuestionTimer();
+    persistSession();
   }
 }
 
@@ -587,6 +791,7 @@ async function revealAnswer(question) {
     state.answers[question.id] = { ...(state.answers[question.id] || {}), ...details, revealed: true };
     renderQuestionCard();
     document.getElementById("next-question").disabled = false;
+    persistSession();
   } catch (err) {
     const feedbackEl = document.getElementById("feedback");
     if (feedbackEl) {
@@ -753,6 +958,9 @@ async function showSummary(showAll = false) {
     summaryList.appendChild(item);
   });
   await persistResults();
+  updateSessionMeta();
+  updateTimerDisplay();
+  persistSession();
 }
 
 reloadBtn.addEventListener("click", fetchTests);
@@ -762,7 +970,7 @@ restartBtn.addEventListener("click", () => {
       state.activeTest.id,
       state.lastRequestedCount || 0,
       state.mode || "regular",
-      state.lastTimeLimitMinutes || 0
+      state.lastTimeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES
     );
   }
 });
@@ -780,7 +988,7 @@ reviewIncorrectBtn.addEventListener("click", () => {
     state.activeTest.id,
     0,
     "review_incorrect",
-    state.lastTimeLimitMinutes || 0
+    state.lastTimeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES
   );
 });
 backToTestsBtn.addEventListener("click", () => {
@@ -801,8 +1009,11 @@ backToTestsBtn.addEventListener("click", () => {
   state.resultsPersisted = false;
   state.lastResults = [];
   state.lastRequestedCount = 0;
-  state.lastTimeLimitMinutes = 0;
+  state.lastTimeLimitMinutes = DEFAULT_TIME_LIMIT_MINUTES;
   state.questionGridCollapsed = true;
+  state.timerHidden = false;
+  state.sessionStart = null;
+  state.questionStart = null;
   summaryNote.classList.add("hidden");
   stopSessionTimer();
   updateTimerDisplay();
@@ -827,7 +1038,24 @@ backToTestsBtn.addEventListener("click", () => {
   renderQuestionCard();
   updateScore();
   updateProgress();
+  clearPersistedSession();
+  updateSessionMeta();
+  persistSession();
+});
+
+window.addEventListener("beforeunload", () => {
+  recordCurrentQuestionTime();
+  persistSession();
+});
+
+window.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    recordCurrentQuestionTime();
+    persistSession();
+  }
 });
 
 // Kick off
+restoreSessionFromStorage();
 fetchTests();
+updateTimerDisplay();
