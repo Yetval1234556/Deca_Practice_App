@@ -1,12 +1,14 @@
 const SESSION_KEY = "deca-active-session-v1";
+const HISTORY_KEY = "deca-history-v1";
 const DEFAULT_TIME_LIMIT_MINUTES = 90;
+
 const state = {
   tests: [],
   activeTest: null,
   questions: [],
   currentIndex: 0,
   score: 0,
-  answers: {}, // { [questionId]: { choice, correct, revealed, correctIndex, correctLetter, explanation } }
+  answers: {},
   selectedCount: 0,
   totalAvailable: 0,
   showAllExplanations: false,
@@ -14,7 +16,7 @@ const state = {
   questionStart: null,
   timerInterval: null,
   totalElapsedMs: 0,
-  perQuestionMs: {}, // questionId -> ms
+  perQuestionMs: {},
   timerHidden: false,
   timeLimitMs: 0,
   timeRemainingMs: 0,
@@ -38,6 +40,7 @@ function parseDefaultRandom() {
   return false;
 }
 
+// Global Elements
 const testListEl = document.getElementById("test-list");
 const reloadBtn = document.getElementById("reload-tests");
 const questionArea = document.getElementById("question-area");
@@ -57,6 +60,15 @@ const toggleTimerBtn = document.getElementById("toggle-timer");
 const reviewIncorrectBtn = document.getElementById("review-incorrect");
 const summaryNote = document.getElementById("summary-note");
 const sessionFooter = document.getElementById("session-footer");
+const summaryChart = document.getElementById("summary-chart");
+const chartCanvas = document.getElementById("performance-chart");
+
+let performanceChartInstance = null; // Chart.js instance
+let settingsOpenedFromHash = false;
+
+/**
+ * --- UTILITIES ---
+ */
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (tag) => {
@@ -85,64 +97,159 @@ function shuffleQuestions(list) {
   return arr;
 }
 
-function persistSession() {
-  if (typeof localStorage === "undefined") return;
-  if (!state.activeTest || !state.questions.length) {
-    try {
-      localStorage.removeItem(SESSION_KEY);
-    } catch (err) {
-      // ignore storage errors
-    }
-    return;
-  }
-  const payload = {
-    activeTest: state.activeTest,
-    questions: state.questions,
-    currentIndex: state.currentIndex,
+function formatMs(ms) {
+  const totalSeconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
+  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${seconds}`;
+}
+
+/**
+ * --- HISTORY & ANALYTICS ---
+ */
+
+function saveSessionToHistory() {
+  if (!state.activeTest || !state.questions.length) return;
+
+  const historyItem = {
+    testId: state.activeTest.id,
+    testName: state.activeTest.name,
+    date: new Date().toISOString(),
     score: state.score,
-    answers: state.answers,
-    selectedCount: state.selectedCount,
-    totalAvailable: state.totalAvailable,
-    showAllExplanations: state.showAllExplanations,
-    sessionStart: state.sessionStart,
-    questionStart: state.questionStart,
-    totalElapsedMs: state.totalElapsedMs,
-    perQuestionMs: state.perQuestionMs,
-    timerHidden: state.timerHidden,
-    timeLimitMs: state.timeLimitMs,
-    timeRemainingMs: state.timeRemainingMs,
-    mode: state.mode,
-    sessionComplete: state.sessionComplete,
-    endedByTimer: state.endedByTimer,
-    resultsPersisted: state.resultsPersisted,
-    lastResults: state.lastResults,
-    lastRequestedCount: state.lastRequestedCount,
-    lastTimeLimitMinutes: state.lastTimeLimitMinutes,
-    questionGridCollapsed: state.questionGridCollapsed,
-    randomOrderEnabled: state.randomOrderEnabled,
+    total: state.questions.length,
+    elapsedMs: state.totalElapsedMs,
+    mode: state.mode
   };
+
   try {
-    localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
-  } catch (err) {
-    // ignore storage errors
+    const raw = localStorage.getItem(HISTORY_KEY);
+    const history = raw ? JSON.parse(raw) : [];
+    history.push(historyItem);
+    // Keep last 50 runs
+    if (history.length > 50) history.shift();
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(history));
+  } catch (e) {
+    console.error("Failed to save history", e);
   }
 }
 
-function clearPersistedSession() {
-  try {
-    localStorage.removeItem(SESSION_KEY);
-  } catch (err) {
-    // ignore
+function renderPerformanceChart() {
+  if (!chartCanvas || !summaryChart) return;
+
+  // Destroy old instance if exists
+  if (performanceChartInstance) {
+    performanceChartInstance.destroy();
+    performanceChartInstance = null;
   }
+
+  // Load history
+  let history = [];
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY);
+    history = raw ? JSON.parse(raw) : [];
+  } catch (e) { }
+
+  if (history.length < 2) {
+    summaryChart.classList.add("hidden");
+    return;
+  }
+  summaryChart.classList.remove("hidden");
+
+  // Take last 10 sessions
+  const recent = history.slice(-10);
+
+  const labels = recent.map((h, i) => `Run ${i + 1}`);
+  const dataPoints = recent.map(h => Math.round((h.score / h.total) * 100));
+
+  performanceChartInstance = new Chart(chartCanvas, {
+    type: 'line',
+    data: {
+      labels: labels,
+      datasets: [{
+        label: 'Accuracy (%)',
+        data: dataPoints,
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99, 102, 241, 0.2)',
+        tension: 0.4,
+        fill: true,
+        pointBackgroundColor: '#8b5cf6',
+        pointRadius: 4
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.raw}% Accuracy`
+          }
+        }
+      },
+      scales: {
+        y: {
+          beginAtZero: true,
+          max: 100,
+          grid: { color: 'rgba(255,255,255,0.05)' },
+          ticks: { color: '#9ca3af' }
+        },
+        x: {
+          display: false // hide labels for cleaner look
+        }
+      }
+    }
+  });
+}
+
+/**
+ * --- SESSION STATE MANAGEMENT ---
+ */
+
+function persistSession() {
+  if (typeof localStorage === "undefined") return;
+  if (!state.activeTest || !state.questions.length) {
+    try { localStorage.removeItem(SESSION_KEY); } catch (err) { }
+    return;
+  }
+  const payload = { ...state }; // Clone state
+  try {
+    localStorage.setItem(SESSION_KEY, JSON.stringify(payload));
+  } catch (err) { }
+}
+
+function clearPersistedSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch (err) { }
+}
+
+function resetState() {
+  stopSessionTimer();
+  state.activeTest = null;
+  state.questions = [];
+  state.answers = {};
+  state.currentIndex = 0;
+  state.score = 0;
+  state.selectedCount = 0;
+  state.totalAvailable = 0;
+  state.sessionComplete = false;
+  state.endedByTimer = false;
+  state.mode = "regular";
+  state.questionStart = null;
+  state.perQuestionMs = {};
+  questionArea.classList.remove("hidden");
+  summaryArea.classList.add("hidden");
+  renderQuestionCard();
+  updateScore();
+  updateProgress();
+  renderQuestionGrid();
+  updateSessionMeta();
+  clearPersistedSession();
 }
 
 function recomputeScoreFromAnswers() {
   state.score = state.questions.reduce((acc, q) => {
     const status = state.answers[q.id];
-    if (status && status.correct === true) {
-      return acc + 1;
-    }
-    return acc;
+    return (status && status.correct === true) ? acc + 1 : acc;
   }, 0);
 }
 
@@ -180,26 +287,21 @@ function updateSessionMeta() {
   sessionFooter.classList.remove("hidden");
   sessionFooter.innerHTML = `
     <div class="session-footer__title">${escapeHtml(state.activeTest.name)}</div>
-    <div class="session-footer__meta">${countLabel} • ${modeLabel} • ${orderLabel} • ${limitLabel} • ${statusLabel}</div>
+    <div class="session-footer__meta">${countLabel} | ${modeLabel} | ${orderLabel} | ${limitLabel} | ${statusLabel}</div>
     <div class="session-footer__progress">Answered ${answered}/${state.questions.length}</div>
   `;
 }
 
-function formatMs(ms) {
-  const totalSeconds = Math.floor(ms / 1000);
-  const minutes = Math.floor(totalSeconds / 60)
-    .toString()
-    .padStart(2, "0");
-  const seconds = (totalSeconds % 60).toString().padStart(2, "0");
-  return `${minutes}:${seconds}`;
-}
+/**
+ * --- TIMER SUBSYSTEM ---
+ */
 
 function updateTimerDisplay() {
   if (toggleTimerBtn) {
-    toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
+    toggleTimerBtn.textContent = state.timerHidden ? "Show" : "Hide";
   }
   if (state.timerHidden) {
-    timerDisplay.textContent = "— —";
+    timerDisplay.textContent = "--";
     return;
   }
   if (!state.sessionStart) {
@@ -208,7 +310,7 @@ function updateTimerDisplay() {
       return;
     }
     const base = formatMs(state.timeLimitMs || DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000);
-    timerDisplay.textContent = `${base} left`;
+    timerDisplay.textContent = `${base}`;
     return;
   }
   const elapsed = Math.max(0, Date.now() - state.sessionStart);
@@ -216,7 +318,7 @@ function updateTimerDisplay() {
   if (state.timeLimitMs) {
     const remaining = Math.max(state.timeLimitMs - elapsed, 0);
     state.timeRemainingMs = remaining;
-    timerDisplay.textContent = `${formatMs(remaining)} left`;
+    timerDisplay.textContent = `${formatMs(remaining)}`;
   } else {
     timerDisplay.textContent = formatMs(elapsed);
   }
@@ -256,7 +358,7 @@ function stopSessionTimer() {
 
 function toggleTimer() {
   state.timerHidden = !state.timerHidden;
-  toggleTimerBtn.textContent = state.timerHidden ? "Show timer" : "Hide timer";
+  if (window.sfx) window.sfx.playClick();
   updateTimerDisplay();
   persistSession();
 }
@@ -306,6 +408,10 @@ function recordCurrentQuestionTime() {
   persistSession();
 }
 
+/**
+ * --- SYSTEM LIFECYCLE ---
+ */
+
 async function ensureAnswerDetails(question) {
   const existing = state.answers[question.id] || {};
   if (existing.correctIndex !== undefined && existing.explanation !== undefined) {
@@ -328,56 +434,28 @@ async function ensureAnswerDetails(question) {
 
 function restoreSessionFromStorage() {
   let raw;
-  try {
-    raw = localStorage.getItem(SESSION_KEY);
-  } catch (err) {
-    return false;
-  }
+  try { raw = localStorage.getItem(SESSION_KEY); } catch (err) { return false; }
   if (!raw) return false;
   let data = null;
-  try {
-    data = JSON.parse(raw);
-  } catch (err) {
-    return false;
-  }
+  try { data = JSON.parse(raw); } catch (err) { return false; }
+
   if (!data || !data.activeTest || !Array.isArray(data.questions) || !data.questions.length) {
     return false;
   }
-  state.activeTest = data.activeTest;
-  state.questions = data.questions;
-  state.currentIndex = Number.isFinite(data.currentIndex) ? data.currentIndex : 0;
+
+  // Restore state
+  Object.assign(state, data);
+
+  // Re-verify index bounds
   if (state.currentIndex < 0 || state.currentIndex >= state.questions.length) {
     state.currentIndex = 0;
   }
-  state.answers = data.answers || {};
-  state.selectedCount = data.selectedCount || data.questions.length;
-  state.totalAvailable = data.totalAvailable || data.questions.length;
-  state.showAllExplanations = Boolean(data.showAllExplanations);
-  state.sessionStart = data.sessionStart || null;
-  state.questionStart = data.questionStart || null;
-  state.totalElapsedMs = data.totalElapsedMs || 0;
-  state.perQuestionMs = data.perQuestionMs || {};
-  state.timerHidden = Boolean(data.timerHidden);
-  state.timeLimitMs = typeof data.timeLimitMs === "number" ? data.timeLimitMs : 0;
-  state.timeRemainingMs = typeof data.timeRemainingMs === "number" ? data.timeRemainingMs : 0;
-  state.mode = data.mode || "regular";
-  state.sessionComplete = Boolean(data.sessionComplete);
-  state.endedByTimer = Boolean(data.endedByTimer);
-  state.resultsPersisted = Boolean(data.resultsPersisted);
-  state.lastResults = data.lastResults || [];
-  state.lastRequestedCount = typeof data.lastRequestedCount === "number" ? data.lastRequestedCount : 0;
-  state.lastTimeLimitMinutes =
-    typeof data.lastTimeLimitMinutes === "number" ? data.lastTimeLimitMinutes : DEFAULT_TIME_LIMIT_MINUTES;
+
+  // Ensure timers are sane
   if (!state.timeLimitMs || state.timeLimitMs <= 0) {
     state.timeLimitMs = DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000;
-    state.timeRemainingMs = state.timeLimitMs;
   }
-  if (!state.lastTimeLimitMinutes || state.lastTimeLimitMinutes <= 0) {
-    state.lastTimeLimitMinutes = DEFAULT_TIME_LIMIT_MINUTES;
-  }
-  state.questionGridCollapsed = data.questionGridCollapsed !== undefined ? data.questionGridCollapsed : true;
-  state.randomOrderEnabled =
-    data.randomOrderEnabled !== undefined ? data.randomOrderEnabled : isRandomOrderEnabled();
+
   recomputeScoreFromAnswers();
   activeTestName.textContent = state.activeTest.name || "Active test";
 
@@ -401,6 +479,10 @@ function restoreSessionFromStorage() {
   updateTimerDisplay();
   return true;
 }
+
+/**
+ * --- DATA FETCHING & UI RENDERING ---
+ */
 
 async function fetchTests() {
   testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
@@ -449,45 +531,57 @@ function renderTestList() {
       </div>
       <div class="test-actions">
         <label>
-          <span class="muted small-label">Question count</span>
+          <span class="muted small-label">Count</span>
           <select class="count-select" data-test-id="${test.id}">
             ${options
-              .map((opt) => `<option value="${opt.value}">${opt.value === 0 ? "All" : opt.label}</option>`)
-              .join("")}
+        .map((opt) => `<option value="${opt.value}">${opt.value === 0 ? "All" : opt.label}</option>`)
+        .join("")}
           </select>
         </label>
         <label>
-          <span class="muted small-label">Time limit (minutes)</span>
+          <span class="muted small-label">Mins</span>
           <div class="time-input-row">
             <input
               class="time-select"
               data-test-id="${test.id}"
               type="text"
-              inputmode="text"
+              inputmode="numeric"
               value="${DEFAULT_TIME_LIMIT_MINUTES}"
               spellcheck="false"
+              style="width: 50px; text-align: center;"
             >
           </div>
-          <span class="muted microcopy">Default is 90 minutes. Leave blank to use the default.</span>
         </label>
-        <button class="primary" data-test-id="${test.id}">Start</button>
+        <button class="primary" data-test-id="${test.id}">
+          <i class="ph ph-play"></i> Start
+        </button>
       </div>
     `;
+
+    // Bindings
     const startBtn = card.querySelector("button");
     const selectEl = card.querySelector(".count-select");
     const timeSelect = card.querySelector(".time-select");
+
     const preferredMinutes =
       state.activeTest && state.activeTest.id === test.id
         ? state.lastTimeLimitMinutes
         : DEFAULT_TIME_LIMIT_MINUTES;
+
     if (timeSelect) {
       timeSelect.value = preferredMinutes > 0 ? preferredMinutes : DEFAULT_TIME_LIMIT_MINUTES;
     }
+
     startBtn.addEventListener("click", () => {
+      if (window.sfx) window.sfx.playSelect();
+      if (typeof window.unlockAudioAndPlay === "function") {
+        window.unlockAudioAndPlay();
+      }
       const count = Number(selectEl.value);
       const parsed = normalizeTimeLimitInput(timeSelect.value);
       startTest(test.id, count, "regular", parsed.minutes);
     });
+
     testListEl.appendChild(card);
   });
 }
@@ -521,15 +615,8 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
       data = null;
     }
     if (!res.ok || !data) {
-      const fallbackMessage =
-        mode === "review_incorrect"
-          ? "No missed questions recorded for this test yet."
-          : "Unable to load test";
-      const msg =
-        (data && (data.description || data.error || data.message)) ||
-        bodyText ||
-        fallbackMessage;
-      throw new Error(typeof msg === "string" ? msg : fallbackMessage);
+      const msg = (data && (data.description || data.error || data.message)) || "Unable to load test";
+      throw new Error(msg);
     }
     state.activeTest = data.test;
     state.mode = data.mode || mode || "regular";
@@ -555,6 +642,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.lastResults = [];
     state.questionGridCollapsed = true;
     state.timerHidden = state.timerHidden || false;
+
     startSessionTimer();
     activeTestName.textContent = state.activeTest.name;
     questionArea.classList.remove("hidden");
@@ -577,6 +665,7 @@ function goToQuestion(idx) {
   if (state.sessionComplete || state.endedByTimer) return;
   if (!state.questions[idx]) return;
   recordCurrentQuestionTime();
+  if (window.sfx) window.sfx.playHover();
   state.currentIndex = idx;
   renderQuestionCard();
 }
@@ -590,8 +679,7 @@ function renderQuestionGrid() {
     questionGrid.classList.add("hidden");
     questionGrid.innerHTML = "";
     if (questionGridToggle) {
-      questionGridToggle.textContent = "Show boxes";
-      questionGridToggle.setAttribute("aria-expanded", "false");
+      questionGridToggle.textContent = "Show";
       questionGridToggle.disabled = true;
     }
     return;
@@ -600,13 +688,30 @@ function renderQuestionGrid() {
   questionGridWrapper.classList.remove("hidden");
   if (questionGridToggle) {
     questionGridToggle.disabled = false;
-    questionGridToggle.textContent = state.questionGridCollapsed ? "Show boxes" : "Hide boxes";
-    questionGridToggle.setAttribute("aria-expanded", (!state.questionGridCollapsed).toString());
+    questionGridToggle.innerHTML = state.questionGridCollapsed
+      ? `<i class="ph ph-squares-four"></i> Show`
+      : `<i class="ph ph-caret-up"></i> Hide`;
   }
 
   questionGridShell.classList.toggle("hidden", state.questionGridCollapsed);
   questionGrid.classList.toggle("hidden", state.questionGridCollapsed);
-  questionGrid.innerHTML = "";
+  const contentFragment = document.createDocumentFragment();
+  const existingButtons = Array.from(questionGrid.children);
+  const totalNeeded = state.questions.length;
+
+  // 1. Create missing buttons
+  if (existingButtons.length < totalNeeded) {
+    for (let i = existingButtons.length; i < totalNeeded; i++) {
+      const btn = document.createElement("button");
+      btn.className = "qdot";
+      questionGrid.appendChild(btn);
+    }
+  }
+  // 2. Remove excess buttons (unlikely but safe)
+  while (questionGrid.children.length > totalNeeded) {
+    questionGrid.removeChild(questionGrid.lastChild);
+  }
+
   const idToIndex = new Map(state.questions.map((q, i) => [q.id, i]));
   const sortedByNumber = [...state.questions].sort((a, b) => {
     const aNum = Number.isFinite(a.number) ? a.number : idToIndex.get(a.id) + 1;
@@ -615,32 +720,68 @@ function renderQuestionGrid() {
   });
   const activeId = state.questions[state.currentIndex]?.id;
 
-  sortedByNumber.forEach((q) => {
+  // 3. Update existing buttons efficiently
+  Array.from(questionGrid.children).forEach((btn, i) => {
+    const q = sortedByNumber[i];
+    if (!q) return;
     const idx = idToIndex.get(q.id);
     const status = state.answers[q.id] || {};
-    const btn = document.createElement("button");
-    btn.className = "qdot";
     const label = Number.isFinite(q.number) ? q.number : idx + 1;
-    btn.textContent = label;
-    btn.title = `Question ${label}`;
-    if (q.id === activeId) btn.classList.add("active");
-    if (status.correct === true) {
-      btn.classList.add("correct");
-    } else if (status.correct === false) {
-      btn.classList.add("incorrect");
-    } else if (status.choice !== undefined || status.revealed) {
-      btn.classList.add("answered");
-    }
+
+    // Update text/title only if changed (text node check is fast)
+    if (btn.textContent != label) btn.textContent = label;
+    if (btn.title !== `Question ${label}`) btn.title = `Question ${label}`;
+
+    // Efficient class management
+    const isActive = q.id === activeId;
+    const isCorrect = status.correct === true;
+    const isIncorrect = status.correct === false;
+    const isAnswered = (status.choice !== undefined || status.revealed) && !isCorrect && !isIncorrect;
+
+    // Helper to minimize DOM tokens list touching
+    const setClass = (cls, on) => {
+      if (on && !btn.classList.contains(cls)) btn.classList.add(cls);
+      if (!on && btn.classList.contains(cls)) btn.classList.remove(cls);
+    };
+
+    setClass("active", isActive);
+    setClass("correct", isCorrect);
+    setClass("incorrect", isIncorrect);
+    setClass("answered", isAnswered);
+
+    // Re-bind click listener only if needed? 
+    // Actually, cleaner to just replace the clone or use event delegation. 
+    // For simplicity in this codebase, let's just update the ONCLICK property to avoid adding multiple listeners
+    btn.onclick = function () { goToQuestion(idx); };
+
     if (state.endedByTimer) {
       btn.disabled = true;
     } else {
-      btn.addEventListener("click", () => goToQuestion(idx));
+      btn.disabled = false;
     }
-    questionGrid.appendChild(btn);
   });
 
   if (!state.questionGridCollapsed) {
     scrollActiveQuestionIntoView();
+  }
+}
+
+function areAnimationsEnabled() {
+  try {
+    const key = "deca-animations-enabled";
+    const val = localStorage.getItem(key);
+    return val === null || val === "true"; // Default true
+  } catch { return true; }
+}
+
+function triggerConfetti() {
+  if (!areAnimationsEnabled()) return;
+  if (window.confetti) {
+    window.confetti({
+      particleCount: 100,
+      spread: 70,
+      origin: { y: 0.6 }
+    });
   }
 }
 
@@ -657,9 +798,48 @@ function scrollActiveQuestionIntoView() {
 
 function toggleQuestionGrid() {
   state.questionGridCollapsed = !state.questionGridCollapsed;
+  if (window.sfx) window.sfx.playClick();
   renderQuestionGrid();
   persistSession();
 }
+
+/**
+ * --- KEYBOARD SHORTCUTS ---
+ */
+document.addEventListener("keydown", (e) => {
+  // Only enable if test is active and not finished
+  if (summaryArea && !summaryArea.classList.contains("hidden")) return;
+  if (!state.activeTest || state.sessionComplete || state.endedByTimer) return;
+
+  // Numbers 1-5 maps to options 0-4
+  if (e.key >= '1' && e.key <= '5') {
+    const idx = parseInt(e.key) - 1;
+    const question = state.questions[state.currentIndex];
+    if (question && idx < question.options.length) {
+      handleAnswer(question, idx);
+    }
+  }
+  // Letters A-E maps to options 0-4
+  const code = e.key.toUpperCase().charCodeAt(0);
+  if (code >= 65 && code <= 69) { // A=65, E=69
+    const idx = code - 65;
+    const question = state.questions[state.currentIndex];
+    if (question && idx < question.options.length) {
+      handleAnswer(question, idx);
+    }
+  }
+
+  // Navigation
+  if (e.key === "ArrowRight" || e.key === "Enter") {
+    nextQuestion();
+  }
+  if (e.key === "ArrowLeft") {
+    prevQuestion();
+  }
+  if (e.key === " ") { // Spacebar to toggle grid? Or maybe just ignore to prevent scrolling
+    // e.preventDefault();
+  }
+});
 
 function renderQuestionCard() {
   if (!state.activeTest || !state.questions.length) {
@@ -676,39 +856,52 @@ function renderQuestionCard() {
   const controlsDisabled = state.sessionComplete || state.endedByTimer;
   const feedbackText = status
     ? status.correct
-      ? "Correct! Change your answer anytime to re-check."
+      ? "Correct! Well done."
       : status.correct === false
-        ? "Incorrect — adjust your pick to try again."
-        : "Answer revealed"
-    : "Pick or change an answer to get instant feedback.";
+        ? "Incorrect."
+        : "Answer revealed."
+    : "Pick an answer or press key (A, B, C, D).";
 
   const isLast = state.currentIndex === state.questions.length - 1;
+  const letters = ["A", "B", "C", "D", "E"];
+
   questionArea.innerHTML = `
     <div class="question-head">
       <div>
-        <p class="eyebrow">Question ${state.currentIndex + 1} of ${state.questions.length}${question.number ? ` • #${question.number}` : ""}</p>
+        <p class="eyebrow">
+            Question ${state.currentIndex + 1} of ${state.questions.length} ${question.number ? `| #${question.number}` : ""}
+        </p>
         <div class="question-text">${escapeHtml(question.question)}</div>
       </div>
     </div>
     <div class="options">
       ${question.options
-        .map(
-          (option, idx) =>
-            `<button class="option-btn" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
+      .map(
+        (option, idx) =>
+          `<button class="option-btn" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
+              <span class="kbd-hint">${letters[idx] || (idx + 1)}</span>
               <strong>${String.fromCharCode(65 + idx)}.</strong> ${escapeHtml(option)}
             </button>`
-        )
-        .join("")}
+      )
+      .join("")}
     </div>
     <div id="feedback" class="feedback ${status ? (status.correct ? "correct" : status.correct === false ? "incorrect" : "") : ""}">
       ${feedbackText}
     </div>
     <div id="explanation" class="explanation ${status && status.revealed ? "" : "hidden"}"></div>
     <div class="actions">
-      <button id="prev-question" class="ghost" ${controlsDisabled ? "disabled" : ""}>Previous question</button>
-      <button id="next-question" class="primary" ${controlsDisabled ? "disabled" : ""}>${isLast ? "Finish" : "Next question"}</button>
-      <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>Show correct answer</button>
-      <button id="submit-quiz" class="ghost" ${controlsDisabled ? "disabled" : ""}>Submit & score</button>
+      <button id="prev-question" class="ghost" ${controlsDisabled ? "disabled" : ""}>
+        <i class="ph ph-caret-left"></i> Previous
+      </button>
+      <button id="next-question" class="primary" ${controlsDisabled ? "disabled" : ""}>
+        ${isLast ? '<i class="ph ph-check-circle"></i> Finish' : 'Next <i class="ph ph-caret-right" style="margin-left:6px; margin-right:0;"></i>'}
+      </button>
+      <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>
+        <i class="ph ph-eye"></i> Answer
+      </button>
+      <button id="submit-quiz" class="ghost" ${controlsDisabled ? "disabled" : ""}>
+        <i class="ph ph-flag"></i> Submit
+      </button>
     </div>
   `;
 
@@ -740,7 +933,8 @@ function renderQuestionCard() {
   const submitBtn = document.getElementById("submit-quiz");
   submitBtn.addEventListener("click", () => {
     if (state.sessionComplete || state.endedByTimer) return;
-    showSummary(false);
+    showSummary(false); // finish
+    if (window.sfx) window.sfx.playClick();
   });
   const nextBtn = document.getElementById("next-question");
   nextBtn.addEventListener("click", nextQuestion);
@@ -748,6 +942,7 @@ function renderQuestionCard() {
   const prevBtn = document.getElementById("prev-question");
   prevBtn.addEventListener("click", prevQuestion);
   prevBtn.disabled = controlsDisabled;
+
   updateScore();
   updateProgress();
   renderQuestionGrid();
@@ -770,6 +965,13 @@ async function handleAnswer(question, choiceIndex) {
     const data = await res.json();
     const existing = state.answers[question.id] || {};
     state.answers[question.id] = { ...existing, choice: choiceIndex, correct: data.correct };
+
+    // Sound FX
+    if (window.sfx) {
+      if (data.correct) window.sfx.playCorrect();
+      else window.sfx.playIncorrect();
+    }
+
     recomputeScoreFromAnswers();
     renderQuestionCard();
     persistSession();
@@ -787,275 +989,244 @@ async function handleAnswer(question, choiceIndex) {
 async function revealAnswer(question) {
   if (state.sessionComplete || state.endedByTimer) return;
   try {
+    if (window.sfx) window.sfx.playClick();
     const details = await ensureAnswerDetails(question);
     state.answers[question.id] = { ...(state.answers[question.id] || {}), ...details, revealed: true };
     renderQuestionCard();
     document.getElementById("next-question").disabled = false;
     persistSession();
   } catch (err) {
-    const feedbackEl = document.getElementById("feedback");
-    if (feedbackEl) {
-      feedbackEl.textContent = err.message;
-      feedbackEl.classList.remove("correct", "incorrect");
-    }
+    // ignore
   }
-}
-
-function renderExplanation(question, status) {
-  const explanationEl = document.getElementById("explanation");
-  if (!explanationEl) return;
-  const correctLetter =
-    status.correctIndex !== undefined ? String.fromCharCode(65 + status.correctIndex) : "?";
-  const explanationText = status.explanation ? `<p>${escapeHtml(status.explanation)}</p>` : "";
-  explanationEl.innerHTML = `
-    <strong>Correct answer: ${correctLetter}</strong>
-    ${explanationText}
-  `;
-  explanationEl.classList.remove("hidden");
 }
 
 async function nextQuestion() {
-  if (state.sessionComplete || state.endedByTimer) return;
-  recordCurrentQuestionTime();
-  const currentQuestion = state.questions[state.currentIndex];
-  const total = state.questions.length;
-  const answeredCount = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
-  if (answeredCount >= total) {
-    await showSummary(state.showAllExplanations);
-    progressFill.style.width = "100%";
-    return;
+  if (window.sfx) window.sfx.playClick();
+  if (state.currentIndex < state.questions.length - 1) {
+    goToQuestion(state.currentIndex + 1);
+  } else {
+    // Finish
+    await showSummary(false);
   }
-  for (let step = 1; step <= total; step += 1) {
-    const idx = (state.currentIndex + step) % total;
-    if (!questionDone(state.questions[idx].id)) {
-      state.currentIndex = idx;
-      renderQuestionCard();
-      return;
-    }
-  }
-  state.currentIndex = (state.currentIndex + 1) % total;
-  renderQuestionCard();
 }
 
 function prevQuestion() {
-  if (state.sessionComplete || state.endedByTimer) return;
-  recordCurrentQuestionTime();
-  const total = state.questions.length;
-  state.currentIndex = (state.currentIndex - 1 + total) % total;
-  renderQuestionCard();
+  if (window.sfx) window.sfx.playClick();
+  if (state.currentIndex > 0) {
+    goToQuestion(state.currentIndex - 1);
+  }
 }
 
-async function persistResults() {
-  if (!state.activeTest || state.resultsPersisted) return;
-  const results = state.questions.map((q) => {
-    const status = state.answers[q.id];
-    return { question_id: q.id, correct: Boolean(status && status.correct === true) };
-  });
-  state.lastResults = results;
-  try {
-    const res = await fetch(
-      `/api/tests/${encodeURIComponent(state.activeTest.id)}/results`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ results }),
-      }
-    );
-    if (!res.ok) throw new Error("Failed to store session results");
+async function showSummary(forceShowExplanations) {
+  state.sessionComplete = true;
+  clearInterval(state.timerInterval);
+  updateSessionMeta();
+
+  // Persist history once
+  if (!state.resultsPersisted) {
+    saveSessionToHistory();
     state.resultsPersisted = true;
-  } catch (err) {
-    console.warn("Could not store missed questions", err);
   }
-}
 
-async function showSummary(showAll = false) {
-  if (!state.sessionComplete) {
-    state.sessionComplete = true;
-    recordCurrentQuestionTime();
-    stopSessionTimer();
-  }
+  // UI Updates
   questionArea.classList.add("hidden");
   summaryArea.classList.remove("hidden");
-  if (questionGrid) {
-    questionGrid.classList.add("hidden");
-  }
-  if (questionGridShell) {
-    questionGridShell.classList.add("hidden");
-  }
-  if (questionGridWrapper) {
-    questionGridWrapper.classList.add("hidden");
-  }
-  if (questionGridToggle) {
-    questionGridToggle.setAttribute("aria-expanded", "false");
-    questionGridToggle.textContent = "Show boxes";
-    questionGridToggle.disabled = true;
-  }
-  const summaryScore = document.getElementById("summary-score");
-  const summaryAccuracy = document.getElementById("summary-accuracy");
-  const summaryList = document.getElementById("summary-list");
-  const summaryTime = document.getElementById("summary-time");
-  const noteMessages = [];
-  if (state.endedByTimer) {
-    noteMessages.push("Session ended because the timer ran out.");
-  }
-  if (state.mode === "review_incorrect") {
-    noteMessages.push("Reviewing missed questions only.");
-  }
-  summaryNote.textContent = noteMessages.join(" ");
-  summaryNote.classList.toggle("hidden", !noteMessages.length);
+  window.scrollTo({ top: 0, behavior: "smooth" });
+
+  recomputeScoreFromAnswers();
+
+  // Calc Stats
   const total = state.questions.length;
-  const displayTotal = total || state.selectedCount || 0;
-  scoreDisplay.textContent = `${state.score} / ${displayTotal}`;
-  const accuracy = total ? Math.round((state.score / total) * 100) : 0;
-  summaryScore.textContent = `You answered ${state.score} out of ${total} correctly.`;
-  summaryAccuracy.textContent = `Accuracy: ${accuracy}%`;
-  summaryTime.textContent = `Total time: ${formatMs(state.totalElapsedMs || 0)}${
-    state.timeLimitMs ? ` (limit ${formatMs(state.timeLimitMs)})` : ""
-  }`;
-  summaryList.innerHTML = "";
-  const targets = state.questions.filter((q) => {
-    const status = state.answers[q.id];
-    if (showAll) return true;
-    return status && status.correct === false;
-  });
-  try {
-    await Promise.all(targets.map((q) => ensureAnswerDetails(q)));
-  } catch (err) {
-    console.warn("Could not load explanations", err);
-  }
-  state.showAllExplanations = showAll;
+  const attempted = Object.keys(state.answers).length;
+  const score = state.score;
+  const percent = total > 0 ? Math.round((score / total) * 100) : 0;
 
-  state.questions.forEach((q, idx) => {
-    const status = state.answers[q.id] || {};
-    let label = "Not answered";
-    let tone = "";
-    if (status.correct === true) {
-      label = "Correct";
-      tone = "correct";
-    } else if (status.correct === false) {
-      label = "Incorrect";
-      tone = "incorrect";
-    } else if (status.revealed) {
-      label = "Revealed";
-    } else if (state.endedByTimer) {
-      label = "Not answered (timed out)";
+  // Render Stats
+  const sScore = document.getElementById("summary-score");
+  const sAcc = document.getElementById("summary-accuracy");
+  const sTime = document.getElementById("summary-time");
+
+  if (sScore) sScore.textContent = `${score} / ${total}`;
+  if (sAcc) sAcc.textContent = `${percent}% Accuracy`;
+  if (sTime) sTime.textContent = `Total time: ${formatMs(state.totalElapsedMs)}`;
+
+  // Render Badge
+  const badgeEl = document.getElementById("summary-score-badge");
+  if (badgeEl) {
+    let badgeClass = "badge-neutral";
+    let badgeText = "Completed";
+
+    if (percent >= 90) { badgeClass = "badge-gold"; badgeText = "Outstanding!"; }
+    else if (percent >= 80) { badgeClass = "badge-silver"; badgeText = "Great Job!"; }
+    else if (percent >= 70) { badgeClass = "badge-bronze"; badgeText = "Good Effort"; }
+
+    badgeEl.className = `summary-badge ${badgeClass}`;
+    badgeEl.textContent = badgeText;
+  }
+
+  // Celebration effects
+  const animEnabled = localStorage.getItem("deca-animations-enabled") !== "false";
+  if (percent > 60 && animEnabled) {
+    triggerConfetti();
+    if (window.sfx && window.sfx.enabled) window.sfx.playFanfare();
+  }
+
+  // Render Charts
+  setTimeout(() => {
+    renderPerformanceChart();
+  }, 100);
+}
+
+function renderExplanation(question, status) {
+  const el = document.getElementById("explanation");
+  if (!el || !status.explanation) return;
+  el.innerHTML = `
+    <strong>Correct Answer: ${status.correctLetter}</strong><br>
+    ${escapeHtml(status.explanation)}
+  `;
+  el.classList.remove("hidden");
+}
+
+// --- Audio Player Logic ---
+// Audio is handled by bg-music.js
+
+
+// --- Settings Virtual Page Logic ---
+function openSettings(fromHash = false) {
+  const overlay = document.getElementById("settings-overlay");
+  if (!overlay) return;
+  settingsOpenedFromHash = Boolean(fromHash);
+  initSettingsLogic(); // Refresh state
+  overlay.classList.remove("hidden");
+
+  const settingsState = { view: "settings" };
+  if (fromHash) {
+    history.replaceState(settingsState, "", "#/settings");
+  } else if (!history.state || history.state.view !== "settings") {
+    history.pushState(settingsState, "", "#/settings");
+  } else if (window.location.hash !== "#/settings") {
+    history.replaceState(settingsState, "", "#/settings");
+  }
+}
+
+function closeSettings(opts = {}) {
+  const overlay = document.getElementById("settings-overlay");
+  if (!overlay) return;
+
+  overlay.classList.add("hidden");
+  const clearHash = () => {
+    if (window.location.hash === "#/settings") {
+      history.replaceState(null, "", window.location.pathname);
     }
-    const item = document.createElement("div");
-    item.className = "summary-item";
-    const shouldShowExplanation = showAll || status.correct === false;
-    const timeTaken = state.perQuestionMs[q.id] || 0;
-    const explanationHtml =
-      shouldShowExplanation && status.explanation !== undefined
-        ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
-            status.explanation || "No explanation provided."
-          )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
-        : `<div class="explanation muted">Time: ${formatMs(timeTaken)}</div>`;
-    item.innerHTML = `
-      <strong>#${q.number || idx + 1}:</strong> ${escapeHtml(q.question)}<br>
-      <span class="${tone}">${label}</span>
-      ${explanationHtml}
-    `;
-    summaryList.appendChild(item);
+  };
+
+  if (opts.fromPop) {
+    settingsOpenedFromHash = false;
+    clearHash();
+    return;
+  }
+
+  if (settingsOpenedFromHash) {
+    settingsOpenedFromHash = false;
+    clearHash();
+    return;
+  }
+
+  if (history.state && history.state.view === "settings") {
+    history.back();
+    // If back() leaves us on the hash (single entry), clear it manually.
+    setTimeout(clearHash, 80);
+  } else {
+    clearHash();
+  }
+}
+
+// Handle Browser Back Button
+window.addEventListener("popstate", (event) => {
+  const overlay = document.getElementById("settings-overlay");
+  if (!overlay) return;
+  if (event.state && event.state.view === "settings") {
+    initSettingsLogic();
+    overlay.classList.remove("hidden");
+  } else {
+    closeSettings({ fromPop: true });
+  }
+});
+
+function initSettingsLogic() {
+  const themeButtons = Array.from(document.querySelectorAll("[data-theme-option]"));
+
+  // Theme Logic
+  const currentTheme = window.Theme ? window.Theme.get() : "light";
+  themeButtons.forEach((btn) => {
+    const t = btn.dataset.theme;
+    const isActive = t === currentTheme;
+    btn.classList.toggle("active", isActive);
+
+    // Remove old listeners to avoid dupes (simple way: clone node? or just re-add is fine if careful)
+    // Actually, cleaner to just set onclick
+    btn.onclick = () => {
+      if (window.Theme) window.Theme.apply(t);
+      initSettingsLogic(); // Re-render active state
+    };
   });
-  await persistResults();
-  updateSessionMeta();
-  updateTimerDisplay();
-  persistSession();
+
+  // Toggles
+  setupToggle("random-order-check", "deca-random-order", false);
+  setupToggle("animations-toggle", "deca-animations-enabled", true);
+
+  // Perf Mode
+  const perfToggle = document.getElementById("perf-mode-toggle");
+  if (perfToggle) {
+    const isPerf = localStorage.getItem("deca-perf-mode") === "true";
+    perfToggle.checked = isPerf;
+    perfToggle.onchange = (e) => {
+      localStorage.setItem("deca-perf-mode", e.target.checked);
+      document.documentElement.classList.toggle("perf-mode", e.target.checked);
+    };
+  }
+
+  // Audio Sync is handled by bg-music.js
 }
 
-reloadBtn.addEventListener("click", fetchTests);
-restartBtn.addEventListener("click", () => {
-  if (state.activeTest) {
-    startTest(
-      state.activeTest.id,
-      state.lastRequestedCount || 0,
-      state.mode || "regular",
-      state.lastTimeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES
-    );
-  }
-});
-showAllExplanationsBtn.addEventListener("click", () => {
-  if (!state.activeTest) return;
-  showSummary(true);
-});
-toggleTimerBtn.addEventListener("click", toggleTimer);
-if (questionGridToggle) {
-  questionGridToggle.addEventListener("click", toggleQuestionGrid);
+function setupToggle(id, key, defaultVal) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const stored = localStorage.getItem(key);
+  el.checked = stored === null ? defaultVal : (stored === "true");
+  el.onchange = (e) => localStorage.setItem(key, e.target.checked);
 }
-reviewIncorrectBtn.addEventListener("click", () => {
-  if (!state.activeTest) return;
-  startTest(
-    state.activeTest.id,
-    0,
-    "review_incorrect",
-    state.lastTimeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES
-  );
-});
-backToTestsBtn.addEventListener("click", () => {
-  state.activeTest = null;
-  state.questions = [];
-  state.currentIndex = 0;
-  state.answers = {};
-  state.score = 0;
-  state.selectedCount = 0;
-  state.totalAvailable = 0;
-  state.showAllExplanations = false;
-  state.perQuestionMs = {};
-  state.timeLimitMs = 0;
-  state.timeRemainingMs = 0;
-  state.mode = "regular";
-  state.sessionComplete = false;
-  state.endedByTimer = false;
-  state.resultsPersisted = false;
-  state.lastResults = [];
-  state.lastRequestedCount = 0;
-  state.lastTimeLimitMinutes = DEFAULT_TIME_LIMIT_MINUTES;
-  state.questionGridCollapsed = true;
-  state.timerHidden = false;
-  state.sessionStart = null;
-  state.questionStart = null;
-  summaryNote.classList.add("hidden");
-  stopSessionTimer();
-  updateTimerDisplay();
-  activeTestName.textContent = "None selected";
-  questionArea.classList.remove("hidden");
-  summaryArea.classList.add("hidden");
-  if (questionGrid) {
-    questionGrid.classList.add("hidden");
-    questionGrid.innerHTML = "";
-  }
-  if (questionGridShell) {
-    questionGridShell.classList.add("hidden");
-  }
-  if (questionGridWrapper) {
-    questionGridWrapper.classList.add("hidden");
-  }
-  if (questionGridToggle) {
-    questionGridToggle.textContent = "Show boxes";
-    questionGridToggle.setAttribute("aria-expanded", "false");
-    questionGridToggle.disabled = true;
-  }
-  renderQuestionCard();
-  updateScore();
-  updateProgress();
-  clearPersistedSession();
-  updateSessionMeta();
-  persistSession();
-});
 
-window.addEventListener("beforeunload", () => {
-  recordCurrentQuestionTime();
-  persistSession();
-});
 
-window.addEventListener("visibilitychange", () => {
-  if (document.visibilityState === "hidden") {
-    recordCurrentQuestionTime();
-    persistSession();
+// Initialization
+document.addEventListener("DOMContentLoaded", () => {
+  // Audio init is handled by bg-music.js
+
+  if (reloadBtn) reloadBtn.addEventListener("click", fetchTests);
+  if (toggleTimerBtn) toggleTimerBtn.addEventListener("click", toggleTimer);
+  if (questionGridToggle) questionGridToggle.addEventListener("click", toggleQuestionGrid);
+  if (restartBtn) restartBtn.addEventListener("click", () => window.location.reload());
+  if (backToTestsBtn) backToTestsBtn.addEventListener("click", () => window.location.reload());
+
+  // Back to home from summary uses resetState
+  const backSumm = document.getElementById("back-to-home-summ");
+  if (backSumm) backSumm.onclick = () => {
+    resetState();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  if (window.Theme) window.Theme.init();
+
+  if (window.location.hash === "#/settings") {
+    openSettings(true);
   }
-});
 
-// Kick off
-restoreSessionFromStorage();
-fetchTests();
-updateTimerDisplay();
+  // Clean Slate: Force reset on load
+  try {
+    localStorage.removeItem(SESSION_KEY);
+    resetState();
+  } catch (e) { }
+
+  // Always fetch tests to populate sidebar
+  fetchTests();
+});

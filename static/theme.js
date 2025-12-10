@@ -35,4 +35,12 @@
   };
 
   initTheme();
+
+  // Performance Mode Init
+  (function () {
+    try {
+      const perf = localStorage.getItem("deca-perf-mode") === "true";
+      if (perf) document.documentElement.classList.add("perf-mode");
+    } catch (e) { }
+  })();
 })();

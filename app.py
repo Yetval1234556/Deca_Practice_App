@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 
-from flask import Flask, jsonify, render_template, request, abort
+from flask import Flask, jsonify, render_template, request, abort, redirect, url_for
 from pypdf import PdfReader
 from werkzeug.exceptions import HTTPException
 
@@ -299,9 +299,20 @@ def _parse_questions(lines: List[str], stop: int | None = None) -> List[Dict[str
             if opt_match:
                 if header_guard.search(opt_match.group(2) or ""):
                     continue
+                
+                # Splitting embedded options even if the line starts with one (e.g. "A. Text C. Text")
+                label = opt_match.group(1).upper()
+                remainder = opt_match.group(2)
+                
+                more_prefix, more_opts = _split_inline_options(remainder)
+                
                 current["options"].append(
-                    {"label": opt_match.group(1).upper(), "text": opt_match.group(2).strip()}
+                    {"label": label, "text": more_prefix}
                 )
+                if more_opts:
+                     current["options"].extend(
+                        [opt for opt in more_opts if not header_guard.search(opt.get("text", ""))]
+                     )
                 continue
 
             prefix_text, inline_opts = _split_inline_options(line)
@@ -500,7 +511,8 @@ def home():
 
 @app.route("/settings")
 def settings():
-    return render_template("settings.html", default_random_order=DEFAULT_RANDOM_ORDER)
+    # Keep a single-page experience; direct /settings visits jump to the hash route.
+    return redirect(f"{url_for('home')}#/settings", code=302)
 
 
 @app.route("/api/tests")
