@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DECA Practice Lab</title>
+  <script>
+    (function () {
+      const saved = localStorage.getItem("deca-theme");
+      if (saved === "dark" || saved === "light") {
+        document.documentElement.setAttribute("data-theme", saved);
+      }
+    })();
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap"
+    rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+  <link rel="icon" type="image/png" sizes="any" href="{{ url_for('static', filename='favicon.png') }}">
+</head>
+
+<body>
+  <div id="unlock-overlay" class="unlock-overlay">
+    <div class="unlock-content">
+      <i class="ph-duotone ph-play-circle symbol"></i>
+      <h1>DECA Practice Lab</h1>
+      <p>Click to open and start your session.</p>
+      <button id="unlock-start-btn" class="primary unlock-action" type="button">
+        <i class="ph ph-play"></i> Enter
+      </button>
+    </div>
+  </div>
+  <script>
+    window.DEFAULT_RANDOM_ORDER = {{ "true" if default_random_order else "false" }};
+  </script>
+  <div class="bg-grid"></div>
+  <header class="topbar">
+    <div>
+      <div class="logo-area">
+        <i class="ph-duotone ph-exam symbol"></i>
+        <div>
+          <h1>DECA Practice Lab</h1>
+          <p class="subtitle">Master your competitive event with instant feedback.</p>
+        </div>
+      </div>
+    </div>
+    <div class="topbar-actions">
+      <div class="pill">
+        <span class="dot"></span>
+        <span>Local & Private</span>
+      </div>
+      <button class="btn-icon" id="audio-toggle-btn" title="Toggle Music">
+        <i class="ph ph-speaker-slash"></i>
+      </button>
+      <div id="audio-player-placeholder" style="display:none;"></div>
+      <button class="btn-nav" onclick="openSettings()">
+        <i class="ph ph-gear"></i> Settings
+      </button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="panel test-panel">
+      <div class="panel-header">
+        <div>
+          <p class="eyebrow">Available Tests</p>
+          <h2>Pick a Deck</h2>
+        </div>
+        <button class="ghost btn-icon" id="reload-tests" title="Reload tests from disk">
+          <i class="ph ph-arrows-clockwise"></i>
+        </button>
+      </div>
+      <div id="test-list" class="test-list">
+        <p class="muted">Looking for tests in <code>tests/</code>...</p>
+      </div>
+      <div class="instructions">
+        <div class="instructions-header">
+          <i class="ph ph-plus-circle"></i>
+          <span>Add new tests</span>
+        </div>
+        <p>Place DECA PDFs in <code>tests/</code>. Hit reload to import.</p>
+      </div>
+    </aside>
+
+    <section class="panel play-panel">
+      <div class="status-bar">
+        <div class="active-test-wrapper">
+          <p class="eyebrow">Current Session</p>
+          <div id="active-test-name" class="active-test">Select a test</div>
+        </div>
+
+        <div class="stats-group">
+          <div class="timer-block">
+            <p class="eyebrow">Time</p>
+            <div id="timer-display">00:00</div>
+            <button id="toggle-timer" class="ghost text-btn" title="Hide/show timer">Hide</button>
+          </div>
+          <div class="score-block">
+            <p class="eyebrow">Score</p>
+            <div id="score-display">0 / 0</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="progress-shell">
+        <div id="progress-fill" class="progress-fill"></div>
+      </div>
+
+      <div class="question-grid-wrapper hidden" id="question-grid-wrapper">
+        <div class="question-grid-header">
+          <p class="eyebrow">Question Map</p>
+          <button id="toggle-grid" class="ghost small-btn" type="button">
+            <i class="ph ph-squares-four"></i> Show
+          </button>
+        </div>
+        <div class="question-grid-shell" id="question-grid-shell">
+          <div id="question-grid" class="question-grid hidden"></div>
+        </div>
+      </div>
+
+      <div id="question-area" class="card question-card-area">
+        <div class="placeholder">
+          <div class="empty-state-icon">
+            <i class="ph-duotone ph-book-open-text"></i>
+          </div>
+          <h3>Ready to Practice?</h3>
+          <p class="muted">Select a test from the sidebar to begin your session.</p>
+        </div>
+      </div>
+
+      <div id="summary-area" class="card hidden">
+        <div class="summary-header">
+          <h3>Session Complete</h3>
+          <div class="summary-badge" id="summary-score-badge"></div>
+        </div>
+        <p id="summary-score" class="summary-score-large"></p>
+        <p id="summary-accuracy" class="muted"></p>
+        <p id="summary-note" class="muted hidden"></p>
+        <div class="chart-container hidden" id="summary-chart">
+          <canvas id="performance-chart"></canvas>
+        </div>
+
+        <div class="actions">
+          <button id="restart-test" class="primary">
+            <i class="ph ph-arrow-counter-clockwise"></i> Try Again
+          </button>
+          <button id="review-incorrect" class="secondary">
+            <i class="ph ph-warning-circle"></i> Review Missed
+          </button>
+          <button id="show-all-explanations" class="secondary">
+            <i class="ph ph-list-magnifying-glass"></i> Explanations
+          </button>
+          <button id="back-to-home-summ" class="ghost" onclick="resetState()">
+            <i class="ph ph-caret-left"></i> Home
+          </button>
+        </div>
+
+        <div id="summary-list"></div>
+        <p id="summary-time" class="muted"></p>
+      </div>
+      <div id="session-footer" class="session-footer hidden"></div>
+    </section>
+  </main>
+
+  <!-- SETTINGS OVERLAY -->
+  <div id="settings-overlay" class="settings-overlay hidden">
+    <div class="settings-modal">
+      <header class="topbar settings-topbar">
+        <div class="logo-area">
+          <i class="ph-duotone ph-sliders-horizontal symbol"></i>
+          <div>
+            <p class="eyebrow">Preferences</p>
+            <h1>Settings</h1>
+            <p class="subtitle">Customize your practice lab experience.</p>
+          </div>
+        </div>
+        <button class="btn-nav" onclick="closeSettings()" aria-label="Close Settings">
+          <i class="ph ph-x"></i> Close
+        </button>
+      </header>
+
+      <main class="settings-layout-modal">
+        <!-- Theme Section -->
+        <section class="panel">
+          <div class="setting-row stacked">
+            <div>
+              <p class="eyebrow">Appearance</p>
+              <h3>Theme</h3>
+              <p class="muted small">Pick a vibe for the app.</p>
+            </div>
+            <div class="theme-grid" id="theme-options" role="group" aria-label="Theme choices">
+              <button class="theme-card" type="button" data-theme-option data-theme="light">
+                <span class="swatch" data-theme-preview="light">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Light</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="dark">
+                <span class="swatch" data-theme-preview="dark">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Dark</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="midnight">
+                <span class="swatch" data-theme-preview="midnight">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Midnight</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="forest">
+                <span class="swatch" data-theme-preview="forest">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Forest</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="ocean">
+                <span class="swatch" data-theme-preview="ocean">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Ocean</strong></div>
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Preferences Grid -->
+        <div class="settings-grid-layout">
+          <!-- Random Order -->
+          <section class="panel">
+            <div class="setting-header">
+              <i class="ph-duotone ph-shuffle symbol-small"></i>
+              <div class="setting-title">
+                <h4>Random Order</h4>
+                <p class="muted small">Shuffle questions for each run.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="random-order-check">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Animations -->
+          <section class="panel">
+            <div class="setting-header">
+              <i class="ph-duotone ph-confetti symbol-small"></i>
+              <div class="setting-title">
+                <h4>Animations</h4>
+                <p class="muted small">Celebration effects on high scores.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="animations-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Performance -->
+          <section class="panel">
+            <div class="setting-header">
+              <i class="ph-duotone ph-lightning symbol-small"></i>
+              <div class="setting-title">
+                <h4>Performance Mode</h4>
+                <p class="muted small">Remove visual effects to reduce lag.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="perf-mode-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
+          <!-- Audio -->
+          <section class="panel">
+            <div class="setting-header">
+              <i class="ph-duotone ph-speaker-high symbol-small"></i>
+              <div class="setting-title">
+                <h4>Background Music</h4>
+                <p class="muted small">Play Lofi beats while studying.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="global-audio-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script src="{{ url_for('static', filename='audio.js') }}"></script>
+  <script src="{{ url_for('static', filename='bg-music.js') }}"></script>
+  <script src="{{ url_for('static', filename='theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+
+</html>
