@@ -107,6 +107,7 @@ body {
   overflow-x: hidden;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  scroll-behavior: smooth;
 }
 
 /* Background Grid Effect */
@@ -184,6 +185,27 @@ html.perf-mode .bg-grid {
 html.perf-mode .logo-area .symbol {
   background: var(--bg);
   box-shadow: none;
+}
+
+/* Flatten hover/scale effects in performance mode */
+html.perf-mode .option-btn,
+html.perf-mode .btn-icon,
+html.perf-mode .btn-nav,
+html.perf-mode .primary,
+html.perf-mode .secondary,
+html.perf-mode .ghost,
+html.perf-mode .test-card {
+  transform: none !important;
+}
+
+html.perf-mode .option-btn:hover,
+html.perf-mode .btn-icon:hover,
+html.perf-mode .btn-nav:hover,
+html.perf-mode .primary:hover,
+html.perf-mode .secondary:hover,
+html.perf-mode .ghost:hover,
+html.perf-mode .test-card:hover {
+  transform: none !important;
 }
 
 h2 {
@@ -315,7 +337,7 @@ body {
 
 @media (min-width: 900px) {
   .layout {
-    grid-template-columns: 350px 1fr;
+    grid-template-columns: minmax(280px, 360px) 1fr;
   }
 }
 
@@ -418,9 +440,10 @@ body {
   border-radius: var(--radius-md);
   cursor: pointer;
   transition: var(--transition);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 12px;
 }
 
 .test-card:hover {
@@ -440,9 +463,10 @@ body {
 }
 
 .test-actions {
-  display: flex;
+  display: grid;
   gap: 8px;
-  flex-wrap: wrap;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  align-items: center;
   margin-top: 8px;
 }
 

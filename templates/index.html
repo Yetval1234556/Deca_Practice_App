@@ -7,6 +7,14 @@
   <title>DECA Practice Lab</title>
   <script>
     (function () {
+      // Default performance mode ON unless explicitly disabled
+      try {
+        const storedPerf = localStorage.getItem("deca-perf-mode");
+        const perfOn = storedPerf === null ? true : storedPerf === "true";
+        if (storedPerf === null) localStorage.setItem("deca-perf-mode", "true");
+        document.documentElement.classList.toggle("perf-mode", perfOn);
+      } catch (e) { }
+
       const saved = localStorage.getItem("deca-theme");
       if (saved === "dark" || saved === "light") {
         document.documentElement.setAttribute("data-theme", saved);

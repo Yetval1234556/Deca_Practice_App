@@ -408,6 +408,29 @@ function recordCurrentQuestionTime() {
   persistSession();
 }
 
+async function persistResults() {
+  if (!state.activeTest || state.resultsPersisted) return;
+  const results = state.questions.map((q) => {
+    const status = state.answers[q.id];
+    return { question_id: q.id, correct: Boolean(status && status.correct === true) };
+  });
+  state.lastResults = results;
+  try {
+    const res = await fetch(
+      `/api/tests/${encodeURIComponent(state.activeTest.id)}/results`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ results }),
+      }
+    );
+    if (!res.ok) throw new Error("Failed to store session results");
+    state.resultsPersisted = true;
+  } catch (err) {
+    console.warn("Could not store missed questions", err);
+  }
+}
+
 /**
  * --- SYSTEM LIFECYCLE ---
  */
@@ -1018,15 +1041,18 @@ function prevQuestion() {
 }
 
 async function showSummary(forceShowExplanations) {
+  recordCurrentQuestionTime();
   state.sessionComplete = true;
   clearInterval(state.timerInterval);
   updateSessionMeta();
+  state.showAllExplanations = Boolean(forceShowExplanations);
 
   // Persist history once
   if (!state.resultsPersisted) {
     saveSessionToHistory();
     state.resultsPersisted = true;
   }
+  persistResults(); // fire-and-forget; best effort
 
   // UI Updates
   questionArea.classList.add("hidden");
@@ -1045,6 +1071,8 @@ async function showSummary(forceShowExplanations) {
   const sScore = document.getElementById("summary-score");
   const sAcc = document.getElementById("summary-accuracy");
   const sTime = document.getElementById("summary-time");
+  const summaryList = document.getElementById("summary-list");
+  const noteEl = document.getElementById("summary-note");
 
   if (sScore) sScore.textContent = `${score} / ${total}`;
   if (sAcc) sAcc.textContent = `${percent}% Accuracy`;
@@ -1069,6 +1097,60 @@ async function showSummary(forceShowExplanations) {
   if (percent > 60 && animEnabled) {
     triggerConfetti();
     if (window.sfx && window.sfx.enabled) window.sfx.playFanfare();
+  }
+
+  // Summary notes
+  const notes = [];
+  if (state.endedByTimer) notes.push("Session ended because the timer ran out.");
+  if (state.mode === "review_incorrect") notes.push("Reviewing missed questions only.");
+  if (noteEl) {
+    noteEl.textContent = notes.join(" ");
+    noteEl.classList.toggle("hidden", !notes.length);
+  }
+
+  // Build question breakdown
+  if (summaryList) {
+    summaryList.innerHTML = "";
+    const targets = state.questions;
+    try {
+      await Promise.all(targets.map((q) => ensureAnswerDetails(q)));
+    } catch (err) {
+      console.warn("Could not load explanations", err);
+    }
+
+    targets.forEach((q, idx) => {
+      const status = state.answers[q.id] || {};
+      let label = "Not answered";
+      let tone = "";
+      if (status.correct === true) {
+        label = "Correct";
+        tone = "correct";
+      } else if (status.correct === false) {
+        label = "Incorrect";
+        tone = "incorrect";
+      } else if (status.revealed) {
+        label = "Revealed";
+      } else if (state.endedByTimer) {
+        label = "Not answered (timed out)";
+      }
+      const showExplanation = forceShowExplanations || status.correct === false;
+      const timeTaken = state.perQuestionMs[q.id] || 0;
+      const explanationHtml =
+        showExplanation && status.explanation !== undefined
+          ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
+              status.explanation || "No explanation provided."
+            )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
+          : `<div class="explanation muted">Time: ${formatMs(timeTaken)}</div>`;
+
+      const item = document.createElement("div");
+      item.className = "summary-item";
+      item.innerHTML = `
+        <strong>#${q.number || idx + 1}:</strong> ${escapeHtml(q.question)}<br>
+        <span class="${tone}">${label}</span>
+        ${explanationHtml}
+      `;
+      summaryList.appendChild(item);
+    });
   }
 
   // Render Charts
@@ -1174,27 +1256,22 @@ function initSettingsLogic() {
   // Toggles
   setupToggle("random-order-check", "deca-random-order", false);
   setupToggle("animations-toggle", "deca-animations-enabled", true);
-
-  // Perf Mode
-  const perfToggle = document.getElementById("perf-mode-toggle");
-  if (perfToggle) {
-    const isPerf = localStorage.getItem("deca-perf-mode") === "true";
-    perfToggle.checked = isPerf;
-    perfToggle.onchange = (e) => {
-      localStorage.setItem("deca-perf-mode", e.target.checked);
-      document.documentElement.classList.toggle("perf-mode", e.target.checked);
-    };
-  }
+  setupToggle("perf-mode-toggle", "deca-perf-mode", true, (val) => {
+    document.documentElement.classList.toggle("perf-mode", val);
+  });
 
   // Audio Sync is handled by bg-music.js
 }
 
-function setupToggle(id, key, defaultVal) {
+function setupToggle(id, key, defaultVal, onChange) {
   const el = document.getElementById(id);
   if (!el) return;
   const stored = localStorage.getItem(key);
   el.checked = stored === null ? defaultVal : (stored === "true");
-  el.onchange = (e) => localStorage.setItem(key, e.target.checked);
+  el.onchange = (e) => {
+    localStorage.setItem(key, e.target.checked);
+    if (typeof onChange === "function") onChange(e.target.checked);
+  };
 }
 
 
@@ -1214,8 +1291,30 @@ document.addEventListener("DOMContentLoaded", () => {
     resetState();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+  const showAllBtn = document.getElementById("show-all-explanations");
+  if (showAllBtn) {
+    showAllBtn.addEventListener("click", () => showSummary(true));
+  }
+  if (reviewIncorrectBtn) {
+    reviewIncorrectBtn.addEventListener("click", () => {
+      if (!state.activeTest) return;
+      startTest(
+        state.activeTest.id,
+        0,
+        "review_incorrect",
+        state.lastTimeLimitMinutes ?? DEFAULT_TIME_LIMIT_MINUTES
+      );
+    });
+  }
 
   if (window.Theme) window.Theme.init();
+  // Apply performance mode preference on load
+  const storedPerf = localStorage.getItem("deca-perf-mode");
+  const perfPref = storedPerf === null ? true : storedPerf === "true";
+  if (storedPerf === null) {
+    localStorage.setItem("deca-perf-mode", "true");
+  }
+  document.documentElement.classList.toggle("perf-mode", perfPref);
 
   if (window.location.hash === "#/settings") {
     openSettings(true);
