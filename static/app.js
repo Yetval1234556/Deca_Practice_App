@@ -29,6 +29,7 @@ const state = {
   lastTimeLimitMinutes: DEFAULT_TIME_LIMIT_MINUTES,
   questionGridCollapsed: true,
   randomOrderEnabled: false,
+  isLocalActive: false,
 };
 
 const RANDOM_KEY = "deca-random-order";
@@ -65,6 +66,7 @@ const chartCanvas = document.getElementById("performance-chart");
 const uploadInput = document.getElementById("pdf-upload-input");
 const uploadBtn = document.getElementById("pdf-upload-btn");
 const uploadStatus = document.getElementById("pdf-upload-status");
+const localTests = new Map(); // cache server-parsed tests to avoid "not found" if session resets
 
 // Fallback for removed audio system
 if (!window.sfx) {
@@ -320,6 +322,7 @@ function resetState() {
   state.mode = "regular";
   state.questionStart = null;
   state.perQuestionMs = {};
+  state.isLocalActive = false;
   questionArea.classList.remove("hidden");
   summaryArea.classList.add("hidden");
   renderQuestionCard();
@@ -525,6 +528,19 @@ async function ensureAnswerDetails(question) {
   if (existing.correctIndex !== undefined && existing.explanation !== undefined) {
     return existing;
   }
+  if (state.isLocalActive) {
+    const q = state.questions.find((item) => item.id === question.id);
+    if (q) {
+      const mergedLocal = {
+        ...existing,
+        correctIndex: q.correct_index,
+        correctLetter: q.correct_letter,
+        explanation: q.explanation,
+      };
+      state.answers[question.id] = mergedLocal;
+      return mergedLocal;
+    }
+  }
   const res = await fetch(
     `/api/tests/${encodeURIComponent(state.activeTest.id)}/answer/${encodeURIComponent(question.id)}`,
     { credentials: "same-origin" }
@@ -644,6 +660,24 @@ async function handleUpload() {
     // Single active test: replace local list with just this upload
     state.tests = [data];
     renderTestList();
+    // Prefetch full test payload to cache locally for offline safety
+    try {
+      const preload = await fetch(`/api/tests/${encodeURIComponent(data.id)}/start_quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ count: 0, mode: "regular", time_limit_seconds: DEFAULT_TIME_LIMIT_MINUTES * 60 }),
+      });
+      const preloadBody = await preload.text();
+      const preloadData = preloadBody ? JSON.parse(preloadBody) : null;
+      if (preload.ok && preloadData && preloadData.questions && preloadData.questions.length) {
+        localTests.set(data.id, preloadData);
+      } else {
+        localTests.delete(data.id);
+      }
+    } catch (e) {
+      localTests.delete(data.id);
+    }
     await refreshTestsWithRetry(2, 250);
   } catch (err) {
     setUploadStatus(err.message || "Upload failed.", true);
@@ -754,23 +788,30 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
       mode,
       time_limit_seconds: enforcedMinutes * 60,
     };
-    const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify(payload),
-    });
-    const bodyText = await res.text();
     let data = null;
+    let usedLocal = false;
     try {
+      const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify(payload),
+      });
+      const bodyText = await res.text();
       data = bodyText ? JSON.parse(bodyText) : null;
+      if (!res.ok || !data) {
+        throw new Error((data && (data.description || data.error || data.message)) || "Unable to load test");
+      }
     } catch (err) {
-      data = null;
+      const cached = localTests.get(testId);
+      if (cached && cached.questions && cached.questions.length) {
+        data = cached;
+        usedLocal = true;
+      } else {
+        throw err;
+      }
     }
-    if (!res.ok || !data) {
-      const msg = (data && (data.description || data.error || data.message)) || "Unable to load test";
-      throw new Error(msg);
-    }
+    state.isLocalActive = usedLocal;
     state.activeTest = data.test;
     state.mode = data.mode || mode || "regular";
     state.randomOrderEnabled = isRandomOrderEnabled();
@@ -1124,23 +1165,30 @@ async function handleAnswer(question, choiceIndex) {
   if (state.sessionComplete || state.endedByTimer) return;
   recordCurrentQuestionTime();
   try {
-    const res = await fetch(
-      `/api/tests/${encodeURIComponent(state.activeTest.id)}/check/${encodeURIComponent(question.id)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ choice: choiceIndex }),
-      }
-    );
-    if (!res.ok) throw new Error("Unable to submit answer");
-    const data = await res.json();
+    let isCorrect = false;
+    if (state.isLocalActive) {
+      const q = state.questions.find((item) => item.id === question.id);
+      if (!q || typeof q.correct_index !== "number") throw new Error("Question data missing");
+      isCorrect = choiceIndex === q.correct_index;
+    } else {
+      const res = await fetch(
+        `/api/tests/${encodeURIComponent(state.activeTest.id)}/check/${encodeURIComponent(question.id)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ choice: choiceIndex }),
+        }
+      );
+      if (!res.ok) throw new Error("Unable to submit answer");
+      const data = await res.json();
+      isCorrect = Boolean(data.correct);
+    }
     const existing = state.answers[question.id] || {};
-    state.answers[question.id] = { ...existing, choice: choiceIndex, correct: data.correct };
+    state.answers[question.id] = { ...existing, choice: choiceIndex, correct: isCorrect };
 
-    // Sound FX
     if (window.sfx) {
-      if (data.correct) window.sfx.playCorrect();
+      if (isCorrect) window.sfx.playCorrect();
       else window.sfx.playIncorrect();
     }
 
