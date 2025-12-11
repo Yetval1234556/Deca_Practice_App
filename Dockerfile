@@ -1,17 +1,20 @@
-# Simple production-ish container for the DECA Practice Lab
 FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PORT=8080
 
 WORKDIR /app
 
+# Install dependencies
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir gunicorn
+RUN python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip install --no-cache-dir gunicorn
 
+# Copy application
 COPY . .
 
 EXPOSE 8080
 
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "app:app"]
+# Honor $PORT if provided (Replit/heroku-style), fallback 8080
+CMD ["/bin/sh", "-c", "exec gunicorn -b 0.0.0.0:${PORT:-8080} app:app"]
