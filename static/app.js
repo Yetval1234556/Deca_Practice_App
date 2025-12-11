@@ -532,7 +532,7 @@ function restoreSessionFromStorage() {
 async function fetchTests() {
   testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
   try {
-    const res = await fetch("/api/tests");
+    const res = await fetch("/api/tests", { cache: "no-store" });
     if (!res.ok) throw new Error("Failed to load tests");
     const data = await res.json();
     state.tests = data;
@@ -650,7 +650,13 @@ async function handleUpload() {
     }
     setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
     uploadInput.value = "";
-    await fetchTests();
+    // Optimistically add to local list for instant display
+    state.tests = [
+      ...state.tests.filter((t) => t.id !== data.id),
+      data
+    ];
+    renderTestList();
+    await fetchTests(); // refresh from server to stay in sync
   } catch (err) {
     setUploadStatus(err.message || "Upload failed.", true);
   } finally {
