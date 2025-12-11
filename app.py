@@ -373,17 +373,24 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
         if not ans_blob:
             continue
         ans_letter = ans_blob["letter"]
-        if not q["options"]:
-            # Without options we cannot run multiple choice practice
-            continue
+        # Ensure at least some options exist; create placeholders if missing
+        if not q.get("options"):
+            q["options"] = [{"label": chr(65 + i), "text": f"Option {chr(65 + i)}"} for i in range(5)]
+        ans_letter = ans_blob["letter"]
         correct_index = None
         for idx, opt in enumerate(q["options"]):
             if opt["label"].upper() == ans_letter:
                 correct_index = idx
                 break
         fallback_idx = ord(ans_letter) - ord("A")
-        if correct_index is None and 0 <= fallback_idx < len(q["options"]):
-            correct_index = fallback_idx
+        if correct_index is None:
+            # Expand option list if the answer letter points beyond current options
+            needed_len = max(len(q["options"]), fallback_idx + 1)
+            if needed_len > len(q["options"]):
+                for i in range(len(q["options"]), needed_len):
+                    q["options"].append({"label": chr(65 + i), "text": f"Option {chr(65 + i)}"})
+            if 0 <= fallback_idx < len(q["options"]):
+                correct_index = fallback_idx
         # As a last resort, keep the question with a safe index to avoid dropping it entirely
         if correct_index is None and q["options"]:
             correct_index = min(len(q["options"]) - 1, max(0, fallback_idx if fallback_idx >= 0 else 0))
