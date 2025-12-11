@@ -183,17 +183,24 @@ async function fetchTests() {
     const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("Failed to load tests");
     const data = await res.json();
-    const mergedIds = new Set();
     const merged = [];
-    localTestSummaries().forEach((t) => {
-      mergedIds.add(t.id);
-      merged.push(t);
-    });
+    const serverIds = new Set();
+
+    // 1. Add server tests (Source of Truth)
     (data || []).forEach((t) => {
-      if (!mergedIds.has(t.id)) {
+      merged.push(t);
+      serverIds.add(t.id);
+      // Optional: If server has it, we could clean it from localTests to avoid stale data
+      // localTests.delete(t.id); 
+    });
+
+    // 2. Add local uploads that are NOT on server
+    localTestSummaries().forEach((t) => {
+      if (!serverIds.has(t.id)) {
         merged.push(t);
       }
     });
+
     state.tests = merged;
     renderTestList();
   } catch (err) {

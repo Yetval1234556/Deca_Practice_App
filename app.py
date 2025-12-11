@@ -4,6 +4,7 @@ import os
 import re
 import tempfile
 import uuid
+import shutil
 from pathlib import Path
 from typing import Dict, List, Any, Optional, IO
 
@@ -11,8 +12,16 @@ from flask import Flask, jsonify, render_template, request, abort, redirect, url
 from pypdf import PdfReader
 from werkzeug.exceptions import HTTPException
 
+# --- CONFIGURATION ---
 BASE_DIR = Path(__file__).parent.resolve()
 TESTS_DIR = BASE_DIR / "tests"
+INSTANCE_DIR = BASE_DIR / "instance"
+SESSION_DATA_DIR = INSTANCE_DIR / "sessions"
+
+# Ensure directories exist
+TESTS_DIR.mkdir(parents=True, exist_ok=True)
+SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+
 MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
 MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
 DEFAULT_RANDOM_ORDER = os.getenv("DEFAULT_RANDOM_ORDER", "false").lower() in {"1", "true", "yes", "on"}
@@ -27,24 +36,28 @@ app.config.update(
 )
 
 
+# --- TEXT PROCESSING UTILITIES ---
+
 def _normalize_whitespace(text: str) -> str:
-    """Collapse excessive whitespace and trim."""
+    """Collapse excessive whitespace and trim, but be careful not to merge words."""
     if not isinstance(text, str):
         return ""
-    # Fix common broken words like "agree ment", "environ ment", "manage ment"
-    # This regex looks for a word char, space, and a suffix common in these docs.
-    text = re.sub(r"(\w)\s+(ment|tion|ing|able|ible)\b", r"\1\2", text)
+    # Only fix very specific broken suffixes common in PDF extraction
+    # patterns like "manage ment" -> "management"
+    text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
+    # Collapse multiple spaces/newlines into one
     return re.sub(r"\s+", " ", text).strip()
 
 
 def _strip_leading_number(text: str) -> str:
-    """Remove leading question/option numbers like '12.' or 'A)' but avoid stripping normal words."""
+    """Remove leading markers like '12.' or 'A)'."""
     return re.sub(r"^\s*(?:\d{1,3}[).:\-]|[A-E][).:\-])\s*", "", text).strip()
 
 
+# --- ERROR HANDLERS ---
+
 @app.errorhandler(HTTPException)
 def _json_http_error(exc: HTTPException):
-    """Return consistent JSON errors for API routes."""
     if request.path.startswith("/api/"):
         response = exc.get_response()
         payload = {"error": exc.name, "description": exc.description}
@@ -57,7 +70,6 @@ def _json_http_error(exc: HTTPException):
 
 @app.errorhandler(Exception)
 def _json_generic_error(exc: Exception):
-    """Fallback JSON error surface for unexpected API failures."""
     if isinstance(exc, HTTPException):
         return _json_http_error(exc)
     if request.path.startswith("/api/"):
@@ -66,748 +78,535 @@ def _json_generic_error(exc: Exception):
     raise exc
 
 
-def _lines_from_pdf(source: Path | IO[bytes], footer_hint: Optional[str] = None) -> List[str]:
-    """Extract lines from a PDF while preserving order and trimming repeated footer noise."""
-    def _looks_like_header_line(text: str) -> bool:
-        patterns = [
-            r"(?i)\bcluster\b",
-            r"(?i)\bcareer\s+cluster\b",
-            r"(?i)\btest\s*(number|#)\b",
-            r"(?i)\bdeca\b",
-            r"(?i)\bexam\b",
-            r"(?i)^page\s+\d+",
-            r"^\d+\s*(of|/)\s*\d+$",
-        ]
-        if any(re.search(p, text) for p in patterns):
-            return True
-        tokens = text.split()
-        if len(tokens) >= 4 and all(tok.isupper() or re.fullmatch(r"[A-Z0-9\-]+", tok) for tok in tokens):
-            return True
-        return False
+# --- PDF PARSING ENGINE ---
+
+def _looks_like_header_line(text: str) -> bool:
+    """Detect lines that are likely running headers/footers."""
+    patterns = [
+        r"(?i)\bcluster\b",
+        r"(?i)\bcareer\s+cluster\b",
+        r"(?i)\btest\s*(number|#)\b",
+        r"(?i)\bdeca\b",
+        r"(?i)\bexam\b",
+        r"(?i)^page\s+\d+",
+        r"^\d+\s*(of|/)\s*\d+$",
+        r"(?i)copyright",
+    ]
+    if any(re.search(p, text) for p in patterns):
+        return True
+    # Heuristic: Uppercase lines with few words are often section headers
+    tokens = text.split()
+    if len(tokens) >= 3 and all(tok.isupper() or re.fullmatch(r"[A-Z0-9\-]+", tok) for tok in tokens):
+        return True
+    return False
+
+def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
+    """Read PDF, remove headers/footers, and return a clean list of lines."""
     reader = PdfReader(source)
     lines: List[str] = []
-    footer_tokens: List[str] = []
-    if footer_hint:
-        normalized = re.sub(r"[_\-]+", " ", footer_hint)
-        normalized = re.sub(r"\s{2,}", " ", normalized).strip()
-        if normalized:
-            footer_tokens.append(normalized)
-            upper_variant = normalized.upper()
-            if upper_variant != normalized:
-                footer_tokens.append(upper_variant)
 
-    def strip_footer(text: str) -> str:
-        if not footer_tokens:
-            return text
-        cleaned = text
-        for token in footer_tokens:
-            cleaned = re.sub(
-                rf"\s*(?:[–—-]|•)?\s*{re.escape(token)}\s*$",
-                "",
-                cleaned,
-                flags=re.IGNORECASE,
-            )
-        return cleaned.strip()
+    # Regex to find embedded Questions (1. ) or Options (A. ) preceded by 2+ spaces
+    # We look for "  1. " or "  A. "
+    # We use a lookahead to keep the number/letter in the new line
+    # NOTE: Use non-capturing group (?:...) inside lookahead so re.split doesn't return the match
+    splitter = re.compile(r"\s{2,}(?=(?:\d{1,3}|[A-E])\s*[.:\-])")
 
     for page in reader.pages:
-        text = page.extract_text() or ""
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if line:
-                # Remove duplicated internal spacing that can scramble tokens
-                line = re.sub(r"\s{2,}", " ", line)
-                line = strip_footer(line)
-                if line:
-                    if not _looks_like_header_line(line):
-                        lines.append(line)
-    # Drop page headers that repeat across pages (often cluster title / test number).
-    freq: Dict[str, int] = {}
-    for line in lines:
-        freq[line] = freq.get(line, 0) + 1
-    header_like = {
-        line
-        for line, count in freq.items()
-        if count >= 2
-        and not re.match(r"^\d{1,3}\s*[).:\-]", line)  # question start
-        and not re.match(r"^[A-E][).:\-]", line)  # option start
-        and _looks_like_header_line(line)
-    }
-    if header_like:
-        lines = [ln for ln in lines if ln not in header_like]
-    return lines
-
-
-def _parse_question_blocks(text: str) -> List[Dict[str, Any]]:
-    questions: List[Dict[str, Any]] = []
-    block_pattern = re.compile(
-        r"(?m)(\d{1,3})\s*[).:\-]\s*(.+?)(?=\n\d{1,3}\s*[).:\-]|\Z)", re.S
-    )
-    opt_block_pattern = re.compile(r"(?i)([A-E])[\).:\-]\s*(.+?)(?=([A-E])[\).:\-]|\Z)", re.S)
-    for match in block_pattern.finditer(text):
-        number = int(match.group(1))
-        body = match.group(2).strip()
-        if not body:
-            continue
-        opts = []
-        opt_match = list(opt_block_pattern.finditer(body))
-        if opt_match:
-            question_text = body[: opt_match[0].start()].strip()
-            for om in opt_match:
-                label = om.group(1).upper()
-                opt_text = om.group(2).strip().replace("\n", " ")
-                if opt_text:
-                    opts.append({"label": label, "text": opt_text})
-        else:
-            question_text = body
-        questions.append(
-            {
-                "number": number,
-                "prompt": question_text.replace("\n", " ").strip(),
-                "options": opts,
-            }
-        )
-    return questions
-
-
-def _split_inline_options(text: str) -> tuple[str, List[Dict[str, str]]]:
-    """Split options embedded on the same line as the question or another option."""
-    opt_pattern = re.compile(r"(?<!\w)([A-E])[\).:\-]\s+(?=\S)")
-    matches = list(opt_pattern.finditer(text))
-    if not matches:
-        return text.strip(), []
-    parts: List[Dict[str, str]] = []
-    prefix = text[: matches[0].start()].strip()
-    for idx, match in enumerate(matches):
-        start = match.end()
-        end = matches[idx + 1].start() if idx + 1 < len(matches) else len(text)
-        body = text[start:end].strip()
-        if body:
-            parts.append({"label": match.group(1).upper(), "text": body})
-    return prefix, parts
-
-
-def _find_answer_section_start(lines: List[str]) -> int:
-    for idx in range(len(lines) - 1, -1, -1):
-        if re.search(r"answer\s*(key|section)?", lines[idx], re.IGNORECASE):
-            return idx
-    # Fallback: assume answers live near the end
-    return max(len(lines) - max(10, len(lines) // 3), 0)
-
-
-def _explode_answer_lines(lines: List[str]) -> List[str]:
-    """Split dense answer key lines like '97.B 98.C' into separate lines."""
-    answer_chunk = re.compile(r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*[A-E]\b", re.IGNORECASE)
-    expanded: List[str] = []
-    for line in lines:
-        matches = list(answer_chunk.finditer(line))
-        if len(matches) <= 1:
-            expanded.append(line)
-            continue
-        for idx, match in enumerate(matches):
-            start = match.start()
-            end = matches[idx + 1].start() if idx + 1 < len(matches) else len(line)
-            chunk = line[start:end].strip()
-            if chunk:
-                expanded.append(chunk)
-    return expanded
-
-
-def _parse_answer_key(lines: List[str], start: int, raw_text: str) -> Dict[int, Dict[str, str]]:
-    """Parse answers plus explanations with guards for scrambled tail sections."""
-    # Allow a bit of prefix noise (e.g., copyright text before "1.A") but avoid matching mid-number years.
-    answer_pattern = re.compile(
-        r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE
-    )
-    answers: Dict[int, Dict[str, str]] = {}
-    expanded_lines = _explode_answer_lines(lines[start:])
-
-    def harvest(line_iterable: List[str]):
-        i = 0
-        while i < len(line_iterable):
-            line = line_iterable[i]
-            match = answer_pattern.search(line)
-            if not match:
-                i += 1
-                continue
-            number = int(match.group(1))
-            letter = match.group(2).upper()
-            explanation_parts: List[str] = []
-            remainder = match.group(3).strip()
-            if remainder:
-                explanation_parts.append(remainder)
-            i += 1
-            # Capture subsequent lines until next answer entry.
-            while i < len(line_iterable):
-                lookahead = line_iterable[i]
-                if answer_pattern.search(lookahead):
-                    break
-                if lookahead.strip():
-                    explanation_parts.append(lookahead.strip())
-                i += 1
-            if 1 <= number <= 100:  # keep strict bounds
-                answers[number] = {
-                    "letter": letter,
-                    "explanation": " ".join(explanation_parts).strip(),
-                }
-
-    # Primary pass (dedicated answer slice)
-    harvest(expanded_lines)
-
-    # If we clearly missed many answers, scan the whole document as a fallback
-    if len(answers) < 80:
-        harvest(_explode_answer_lines(lines))
-
-    # Last-resort scan directly on text to catch tightly packed keys near EOF
-    if len(answers) < 80:
-        blob_pattern = re.compile(
-            r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b(?:\s*(.*?))(?=(?<!\d)\d{1,3}\s*[:.\-)]?\s*[A-E]\b|\Z)",
-            re.IGNORECASE | re.S,
-        )
-        for match in blob_pattern.finditer(raw_text):
-            number = int(match.group(1))
-            letter = match.group(2).upper()
-            explanation = (match.group(3) or "").replace("\n", " ").strip()
-            if 1 <= number <= 100 and number not in answers:
-                answers[number] = {"letter": letter, "explanation": explanation}
-
-    # Normalize ordering and enforce 1..100 bounds
-    cleaned = {
-        n: answers[n]
-        for n in sorted(num for num in answers.keys() if 1 <= num <= 100)
-    }
-    return cleaned
-
-
-def _parse_questions(lines: List[str], stop: int | None = None) -> List[Dict[str, Any]]:
-    questions: List[Dict[str, Any]] = []
-    q_pattern = re.compile(r"^(\d{1,3})\s*[).:\-]?\s+(.*)")
-    opt_pattern = re.compile(r"^\s*([A-E])[\).:\-]?\s*(.*)")
-    current: Dict[str, Any] = {}
-    iterable = lines if stop is None else lines[:stop]
-    chunk_pattern = re.compile(r"(?:^|\s)(\d{1,3})\s*[).:\-]\s+")
-    header_guard = re.compile(
-        r"(?i)(cluster|career cluster|test\s*(number|#)|deca|exam|page\s+\d+|\d+\s*(of|/)\s*\d+)"
-    )
-
-    def split_line(line: str) -> List[str]:
-        parts: List[str] = []
-        matches = list(chunk_pattern.finditer(line))
-        if not matches:
-            return [line]
-        for idx, match in enumerate(matches):
-            start = match.start(1)
-            end = matches[idx + 1].start(1) if idx + 1 < len(matches) else len(line)
-            parts.append(line[start:end].strip())
-        return [p for p in parts if p]
-
-    for raw_line in iterable:
-        for line in split_line(raw_line):
-            q_match = q_pattern.match(line)
-            if q_match:
-                if current:
-                    questions.append(current)
-                current = {
-                    "number": int(q_match.group(1)),
-                    "prompt": "",
-                    "options": [],
-                }
-                q_text, inline_opts = _split_inline_options(q_match.group(2))
-                current["prompt"] = q_text
-                if inline_opts:
-                    current["options"].extend(inline_opts)
-                continue
-
-            if not current:
-                continue
-
-            opt_match = opt_pattern.match(line)
-            if opt_match:
-                if header_guard.search(opt_match.group(2) or ""):
+        raw_text = page.extract_text() or ""
+        for raw_line in raw_text.splitlines():
+            # First, attempt to split combined lines (e.g. "Copyright ... 76. Question ... A. Option")
+            # We do this BEFORE stripping or collapsing spaces, as we rely on the spaces.
+            if splitter.search(raw_line):
+                parts = splitter.split(raw_line)
+            else:
+                parts = [raw_line]
+                
+            for line in parts:
+                line = line.strip()
+                if not line:
                     continue
                 
-                # Splitting embedded options even if the line starts with one (e.g. "A. Text C. Text")
-                label = opt_match.group(1).upper()
-                remainder = opt_match.group(2)
+                # NOW we can normalize internal spaces for this segment
+                line = re.sub(r"\s{2,}", " ", line)
                 
-                more_prefix, more_opts = _split_inline_options(remainder)
+                # Skip obvious noise
+                if _looks_like_header_line(line):
+                    # Try to rescue content from mixed lines (e.g. "Copyright ... 76. Question")
+                    # Common pattern: Copyright ... Ohio  <Number>.
+                    # We strip the copyright part if it exists
+                    cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
+                    if cleaned and cleaned != line:
+                        line = cleaned
+                        # Re-check if it looks like a header (e.g. just page number remaining)
+                        if _looks_like_header_line(line):
+                             continue
+                    else:
+                        continue
+                    
+                lines.append(line)
+            
+    # Remove duplicates that occur exactly every X lines (page headers)
+    # This is a simple frequency filter for lines that appear on >50% of the pages (heuristic)
+    # but strictly suppressing widely repeated lines like "Marketing Cluster Exam"
+    counts = {}
+    for l in lines:
+        counts[l] = counts.get(l, 0) + 1
+    
+    threshold = max(2, len(reader.pages) // 2)
+    final_lines = [l for l in lines if counts[l] < threshold and not _looks_like_header_line(l)]
+    return final_lines
+
+def _parse_answer_key(lines: List[str]) -> Dict[int, Dict[str, str]]:
+    """Scan for the answer key section and parse it."""
+    # Find start of answer key
+    start_idx = -1
+    for i in range(len(lines) - 1, -1, -1):
+        if re.search(r"answer\s*(key|section)", lines[i], re.IGNORECASE):
+            start_idx = i
+            break
+    
+    # If not found, assume it's the last 20% of the file
+    if start_idx == -1:
+        start_idx = max(0, int(len(lines) * 0.8))
+
+    answers = {}
+    
+    # Pattern: "1. A" or "1 A" or "1.A" followed by optional explanation
+    # We look for a number at the start of a logical entry
+    # This regex matches the start of an answer line: digit + char
+    pattern = re.compile(r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
+    
+    # We iterate and capture multi-line explanations
+    i = start_idx
+    while i < len(lines):
+        match = pattern.search(lines[i])
+        if match:
+            num = int(match.group(1))
+            let = match.group(2).upper()
+            expl = match.group(3).strip()
+            i += 1
+            # Slurp lines until next answer number
+            while i < len(lines):
+                if pattern.search(lines[i]) or _looks_like_header_line(lines[i]):
+                    break
+                expl += " " + lines[i].strip()
+                i += 1
+            if 1 <= num <= 100:
+                answers[num] = {"letter": let, "explanation": expl}
+        else:
+            i += 1
+            
+    return answers
+
+
+def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Dict[str, Any]]:
+    """
+    State-machine parser that consumes lines and identifies:
+    - New Question (starts with Number)
+    - Option (starts with A-E)
+    - Continuation of previous text
+    """
+    
+    questions = []
+    current_q = None
+    
+    # Regexes
+    # Start of a question: "1." or "10."
+    q_start_re = re.compile(r"^(\d{1,3})\s*[).:\-]\s+(.*)")
+    # Start of a option: "A." or "(A)"
+    opt_start_re = re.compile(r"^\s*([A-E])\s*[).:\-]\s*(.*)")
+    # Inline option splitter: captures " B. Next text" inside a line
+    inline_opt_re = re.compile(r"(?<!\w)([A-E])\s*[).:\-]\s+")
+
+    def finalize_current():
+        nonlocal current_q
+        if current_q:
+            # Clean up
+            current_q["prompt"] = _normalize_whitespace(current_q["prompt"])
+            for opt in current_q["options"]:
+                opt["text"] = _normalize_whitespace(opt["text"])
+            questions.append(current_q)
+        current_q = None
+
+    for line in lines:
+        # Check for answer key start - stop parsing questions if found
+        if re.search(r"answer\s*(key|section)", line, re.IGNORECASE):
+            break
+
+        # 1. Is it a new question?
+        q_match = q_start_re.match(line)
+        if q_match:
+            finalize_current()
+            num = int(q_match.group(1))
+            text = q_match.group(2)
+            current_q = {
+                "number": num,
+                "prompt": text,
+                "options": []
+            }
+            # Check for inline options in the prompt line
+            # e.g. "1. What is X? A. This B. That"
+            # We rarely see this in these PDFs, but good to handle
+            continue
+
+        if not current_q:
+            continue
+
+        # 2. Is it a new option?
+        opt_match = opt_start_re.match(line)
+        if opt_match:
+            label = opt_match.group(1).upper()
+            text = opt_match.group(2)
+            current_q["options"].append({"label": label, "text": text})
+            
+            # Check compatibility with inline options on the SAME line
+            # e.g. "A. Option 1  B. Option 2"
+            # We split by looking for other [A-E]. markers
+            split_iter = list(inline_opt_re.finditer(text))
+            if split_iter:
+                # We have multiple options on this line. Rewind and split properly.
+                # Actually, simpler: just take the text we just found and split it
+                # The first one is already added, but its text contains the others.
+                # Let's fix the last option added
+                full_text = text
+                # Re-split
+                parts = re.split(inline_opt_re, full_text) # ['First part', 'B', 'Second part', 'C', ...]
+                # parts[0] is the text for the current label
+                current_q["options"][-1]["text"] = parts[0]
                 
-                current["options"].append(
-                    {"label": label, "text": more_prefix}
-                )
-                if more_opts:
-                     current["options"].extend(
-                        [opt for opt in more_opts if not header_guard.search(opt.get("text", ""))]
-                     )
+                # The rest come in pairs: Label, Text
+                idx = 1
+                while idx < len(parts) - 1:
+                    lbl = parts[idx].strip().upper()
+                    val = parts[idx+1].strip()
+                    current_q["options"].append({"label": lbl, "text": val})
+                    idx += 2
+            continue
+
+        # 3. Continuation line
+        # If we have options, append to the last option
+        if current_q["options"]:
+            # Guard: check if this line looks like a question number but was missed
+            # (Strict check to avoid merging next question into previous option)
+            if re.match(r"^\d{1,3}\.", line):
+                finalize_current()
+                # Reprocess this line as a new question
+                # (Recursion or simple loop reset would be better, but for simplicity
+                # we just treat it as a new start if strictly matching)
+                q_match_retry = q_start_re.match(line)
+                if q_match_retry:
+                     num = int(q_match_retry.group(1))
+                     text = q_match_retry.group(2)
+                     current_q = {"number": num, "prompt": text, "options": []}
                 continue
 
-            prefix_text, inline_opts = _split_inline_options(line)
-            if inline_opts:
-                if prefix_text:
-                    if current["options"] and not header_guard.search(prefix_text):
-                        current["options"][-1]["text"] += f" {prefix_text}"
-                    else:
-                        if not header_guard.search(prefix_text):
-                            current["prompt"] += f" {prefix_text}"
-                current["options"].extend(
-                    [opt for opt in inline_opts if not header_guard.search(opt.get("text", ""))]
-                )
-            else:
-                # Attach extra text to the last seen chunk
-                if current["options"] and not header_guard.search(line):
-                    current["options"][-1]["text"] += f" {line.strip()}"
-                elif not header_guard.search(line):
-                    current["prompt"] += f" {line.strip()}"
+            current_q["options"][-1]["text"] += " " + line
+        else:
+            # Append to prompt
+            current_q["prompt"] += " " + line
 
-    if current:
-        questions.append(current)
-    return questions
-
-
-def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict[int, Dict[str, str]]) -> List[Dict[str, Any]]:
-    paired: List[Dict[str, Any]] = []
-    seen_numbers = set()
+    finalize_current()
+    
+    # --- MERGE WITH ANSWERS ---
+    
+    final_questions = []
+    seen_ids = set()
+    
     for q in questions:
-        if q["number"] in seen_numbers:
-            continue
-        ans_blob = answers.get(q["number"])
-        if not ans_blob:
-            continue
-        ans_letter = ans_blob["letter"]
-        # Ensure at least some options exist; create placeholders if missing
-        if not q.get("options"):
-            q["options"] = [{"label": chr(65 + i), "text": f"Option {chr(65 + i)}"} for i in range(5)]
-        ans_letter = ans_blob["letter"]
-        correct_index = None
-        for idx, opt in enumerate(q["options"]):
-            if opt["label"].upper() == ans_letter:
-                correct_index = idx
-                break
-        fallback_idx = ord(ans_letter) - ord("A")
-        if correct_index is None:
-            # Expand option list if the answer letter points beyond current options
-            needed_len = max(len(q["options"]), fallback_idx + 1)
-            if needed_len > len(q["options"]):
-                for i in range(len(q["options"]), needed_len):
-                    q["options"].append({"label": chr(65 + i), "text": f"Option {chr(65 + i)}"})
-            if 0 <= fallback_idx < len(q["options"]):
-                correct_index = fallback_idx
-        # As a last resort, keep the question with a safe index to avoid dropping it entirely
-        if correct_index is None and q["options"]:
-            correct_index = min(len(q["options"]) - 1, max(0, fallback_idx if fallback_idx >= 0 else 0))
-        seen_numbers.add(q["number"])
-        paired.append(
-            {
-                "id": f"{test_id}-q{q['number']}",
-                "number": q["number"],
-                "question": _normalize_whitespace(_strip_leading_number(q.get("prompt", ""))),
-                "options": [_normalize_whitespace(_strip_leading_number(opt.get("text", ""))) for opt in q["options"]],
-                "correct_index": correct_index,
-                "correct_letter": ans_letter,
-                "explanation": _normalize_whitespace(ans_blob.get("explanation", "")),
-            }
-        )
-    return paired
+        num = q["number"]
+        if num in seen_ids: continue
+        
+        ans_data = answers.get(num)
+        ans_letter = ans_data["letter"] if ans_data else None
+        explanation = ans_data["explanation"] if ans_data else ""
+        
+        # Determine correct index
+        correct_idx = None
+        if ans_letter:
+            for i, opt in enumerate(q["options"]):
+                if opt["label"] == ans_letter:
+                    correct_idx = i
+                    break
+        
+        # Fallback if text extraction failed to grab options properly but we know the answer
+        if correct_idx is None and ans_letter:
+            idx_guess = ord(ans_letter) - ord('A')
+            if 0 <= idx_guess < 5:
+                # If we have enough options, assume positional match
+                if idx_guess < len(q["options"]):
+                    correct_idx = idx_guess
+        
+        # Generate ID
+        q_id = f"q-{num}"
+        
+        final_questions.append({
+            "id": q_id,
+            "number": num,
+            "question": q["prompt"],
+            "options": [o["text"] for o in q["options"]],
+            "correct_index": correct_idx,
+            "correct_letter": ans_letter,
+            "explanation": explanation
+        })
+        seen_ids.add(num)
+        
+    return final_questions
 
 
-def _slugify(value: str, fallback: str = "test") -> str:
-    slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", value).strip("-").lower()
-    return slug or fallback
+def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any]:
+    """Single robust entry point for parsing."""
+    try:
+        lines = _extract_clean_lines(source)
+        answers = _parse_answer_key(lines)
+        questions = _smart_parse_questions(lines, answers)
+        
+        # Sort by number
+        questions.sort(key=lambda x: x["number"])
+        
+        test_id = re.sub(r"[^a-z0-9]+", "-", name_hint.lower()).strip("-")
+        # Ensure unique IDs for the test scope
+        for q in questions:
+            q["id"] = f"{test_id}-q{q['number']}"
 
-
-def _parse_uploaded_pdf(file_bytes: bytes, filename: str) -> Dict[str, Any]:
-    name_hint = Path(filename).stem if filename else "uploaded-test"
-    stream = io.BytesIO(file_bytes)
-    return _parse_pdf_source(stream, name_hint=name_hint, description_hint=f"Uploaded: {filename or 'PDF'}")
-
-
-def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
-    return _parse_pdf_source(path, name_hint=path.stem, description_hint=f"Parsed from {path.name}")
-
-
-def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint: Optional[str] = None) -> Dict[str, Any]:
-    """Parse a PDF from a path or file-like into a test structure."""
-    normalized_name_hint = re.sub(r"\s{2,}", " ", re.sub(r"[_\-]+", " ", name_hint)).strip() or "Uploaded Test"
-    lines = _lines_from_pdf(source, footer_hint=normalized_name_hint)
-    if not lines:
+        return {
+            "id": test_id,
+            "name": name_hint,
+            "description": f"Parsed {len(questions)} questions.",
+            "questions": questions
+        }
+    except Exception as e:
+        print(f"Parsing error: {e}")
         return {}
+
+
+# --- PERSISTENCE LAYER (FILESYSTEM) ---
+
+def _get_session_id() -> str:
+    if "sid" not in session:
+        session["sid"] = uuid.uuid4().hex
+    return session["sid"]
+
+def _get_session_file_path(sid: str) -> Path:
+    return SESSION_DATA_DIR / f"{sid}.json"
+
+def _load_session_data(sid: str) -> Dict[str, Any]:
+    path = _get_session_file_path(sid)
+    if not path.exists():
+        return {"uploads": {}, "missed": {}}
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return {"uploads": {}, "missed": {}}
+
+def _save_session_data(sid: str, data: Dict[str, Any]):
+    path = _get_session_file_path(sid)
+    try:
+        with open(path, "w") as f:
+            json.dump(data, f)
+    except Exception as e:
+        print(f"Failed to save session: {e}")
+
+def _get_all_tests_for_session() -> Dict[str, Any]:
+    # 1. Load disk tests (global)
+    all_tests = {}
     
-    # 1. Re-join split words (naive heuristic for common PDF copy-paste issues)
-    # e.g. "agree ment" -> "agreement" if "agreement" is a valid word, but here we just look for specific patterns
-    # or just aggressively join small gaps. For now, let's fix the specific "agree ment" type issues 
-    # by using a regex that looks for lowercase-space-lowercase that might be a split word. 
-    # A full dictionary check is too heavy, so we'll target common 2-letter splits or just rely on better tokenizing.
-    # Actually, a safer bet is to fix it in the final questions list or prompt text.
+    # Simple cache to avoid re-parsing disk PDFs every request
+    #In a real app, use a proper cache. Here we just scan quickly.
+    # Actually, let's re-implement `load_all_tests` correctly using the new parser
+    # cache it in a global for read-only static files
+    global _STATIC_TESTS_CACHE
+    if not _STATIC_TESTS_CACHE:
+        for p in tests_dir_iter():
+            parsed = _parse_pdf_source(p, p.stem)
+            if parsed and parsed.get("questions"):
+                _STATIC_TESTS_CACHE[parsed["id"]] = parsed
     
-    text = "\n".join(lines)
-    answer_start = _find_answer_section_start(lines)
-    answers = _parse_answer_key(lines, answer_start, text)
-    sources: List[List[Dict[str, Any]]] = []
+    all_tests.update(_STATIC_TESTS_CACHE)
     
-    # Try block parsing first (most reliable for standard DECA formats)
-    block_parsed = _parse_question_blocks(text)
-    if block_parsed:
-        sources.append(block_parsed)
-        
-    stop_parsed = _parse_questions(lines, stop=answer_start)
-    if stop_parsed:
-        sources.insert(0, stop_parsed)  # prefer clean split before answer key
-        
-    full_parsed = _parse_questions(lines)
-    if full_parsed:
-        sources.append(full_parsed)
+    # 2. Load session uploads
+    sid = _get_session_id()
+    s_data = _load_session_data(sid)
+    all_tests.update(s_data.get("uploads", {}))
+    
+    return all_tests
 
-    merged: Dict[int, Dict[str, Any]] = {}
-    for source_block in sources:
-        for q in source_block:
-            # Prefer blocks that have options
-            if q["number"] not in merged:
-                merged[q["number"]] = q
-            elif not merged[q["number"]].get("options") and q.get("options"):
-                 merged[q["number"]] = q
+def tests_dir_iter():
+    try:
+        return TESTS_DIR.glob("*.pdf")
+    except:
+        return []
 
-    questions_raw = list(merged.values())
-    # Clean up whitespace noise on prompts and options
-    for q in questions_raw:
-        q_prompt = _normalize_whitespace(_strip_leading_number(q.get("prompt", "")))
-        q["prompt"] = q_prompt
-        cleaned_opts = []
-        for opt in q.get("options", []):
-            label = _normalize_whitespace(opt.get("label", ""))
-            text = _normalize_whitespace(_strip_leading_number(opt.get("text", "")))
-            if label and text:
-                cleaned_opts.append({"label": label, "text": text})
-        q["options"] = cleaned_opts
-
-    test_id = re.sub(r"[^a-zA-Z0-9_\-]+", "-", normalized_name_hint).strip("-").lower() or "uploaded"
-    questions = _attach_answers(test_id, questions_raw, answers)
-    questions = [
-        q for q in questions if isinstance(q.get("number"), int) and 1 <= q["number"] <= 100
-    ]
-    questions = sorted(questions, key=lambda q: q["number"])
-    display_name = normalized_name_hint.title()
-    return {
-        "id": test_id,
-        "name": display_name,
-        "description": description_hint or f"Parsed from {normalized_name_hint}",
-        "questions": questions,
-    }
+_STATIC_TESTS_CACHE = {}
 
 
-_CACHE: Dict[str, Any] = {"stamp": 0.0, "tests": {}, "files": []}
-# Session-scoped uploaded tests and missed-question tracking
-_SESSION_UPLOADS: Dict[str, Dict[str, Any]] = {}
-_MISSED_BY_SESSION: Dict[str, Dict[str, List[str]]] = {}
-
-
-def load_all_tests() -> Dict[str, Dict[str, Any]]:
-    """Read every PDF test file from the tests directory with lightweight caching."""
-    TESTS_DIR.mkdir(parents=True, exist_ok=True)
-    pdf_paths = sorted(TESTS_DIR.glob("*.pdf"))
-    names = [p.name for p in pdf_paths]
-    stamp = max((p.stat().st_mtime for p in pdf_paths), default=0.0)
-    if _CACHE["tests"] and stamp <= _CACHE["stamp"] and names == _CACHE.get("files"):
-        return _CACHE["tests"]
-
-    tests: Dict[str, Dict[str, Any]] = {}
-    for path in pdf_paths:
-        try:
-            parsed = _parse_pdf_to_test(path)
-        except Exception as exc:  # pragma: no cover - defensive guard
-            print(f"Skipping {path.name}: {exc}")
-            continue
-        if not parsed or not parsed.get("questions"):
-            print(f"Skipping {path.name}: no questions/answers parsed.")
-            continue
-        # Ensure questions are sorted by their numeric order and limited to 1-100
-        parsed["questions"] = sorted(parsed["questions"], key=lambda q: q.get("number", 0))
-        tests[parsed["id"]] = parsed
-
-    _CACHE["tests"] = tests
-    _CACHE["stamp"] = stamp
-    _CACHE["files"] = names
-    return tests
-
-
-def _ensure_session_id() -> str:
-    sid = session.get("sid")
-    if not sid:
-        sid = uuid.uuid4().hex
-        session["sid"] = sid
-        session.modified = True
-    return sid
-
-
-def _get_session_tests() -> Dict[str, Dict[str, Any]]:
-    sid = _ensure_session_id()
-    return _SESSION_UPLOADS.get(sid, {})
-
-
-def _get_all_tests_for_session() -> Dict[str, Dict[str, Any]]:
-    tests = dict(load_all_tests())
-    session_tests = _get_session_tests()
-    tests.update(session_tests)
-    return tests
-
-
-def _get_test_or_404(test_id: str) -> Dict[str, Any]:
-    tests = _get_all_tests_for_session()
-    test = tests.get(test_id)
-    if not test:
-        abort(404, description="Test not found")
-    return test
-
-
-def _get_question_or_404(test: Dict[str, Any], question_id: str) -> Dict[str, Any]:
-    for question in test["questions"]:
-        if question["id"] == question_id:
-            return question
-    abort(404, description="Question not found")
-
-
-def _serialize_question_payload(question: Dict[str, Any]) -> Dict[str, Any]:
-    return {
-        "id": question["id"],
-        "question": question["question"],
-        "options": question["options"],
-        "number": question.get("number"),
-    }
-
-
-def get_incorrect_questions(test: Dict[str, Any], results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Filter a result list for incorrect answers and return sanitized questions."""
-    question_map = {q["id"]: q for q in test.get("questions", [])}
-    missed: List[Dict[str, Any]] = []
-    for item in results or []:
-        if not isinstance(item, dict):
-            continue
-        if item.get("correct") is not False:
-            continue
-        qid = item.get("question_id")
-        if qid in question_map:
-            missed.append(_serialize_question_payload(question_map[qid]))
-    return missed
-
-
-def _get_missed_map() -> Dict[str, List[str]]:
-    sid = _ensure_session_id()
-    return _MISSED_BY_SESSION.setdefault(sid, {})
-
-
-def _select_questions_for_mode(
-    test: Dict[str, Any], mode: str = "regular", count: Optional[int] = None
-) -> List[Dict[str, Any]]:
-    questions = list(test["questions"])
-    if mode == "review_incorrect":
-        missed_map = _get_missed_map()
-        missed_ids = set(missed_map.get(test["id"], []))
-        if not missed_ids:
-            return []
-        questions = [q for q in questions if q["id"] in missed_ids]
-    if count and count > 0:
-        questions = questions[: min(count, len(questions), MAX_QUESTIONS_PER_RUN)]
-    return [_serialize_question_payload(q) for q in questions]
-
+# --- ROUTES ---
 
 @app.route("/")
 def home():
     return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
-
 @app.route("/settings")
 def settings():
-    # Keep a single-page experience; direct /settings visits jump to the hash route.
     return redirect(f"{url_for('home')}#/settings", code=302)
-
 
 @app.route("/api/tests")
 def list_tests():
-    tests = _get_all_tests_for_session()
+    data = _get_all_tests_for_session()
     payload = []
-    for test in tests.values():
-        payload.append(
-            {
-                "id": test["id"],
-                "name": test["name"],
-                "description": test.get("description", ""),
-                "question_count": len(test["questions"]),
-            }
-        )
+    for t in data.values():
+        payload.append({
+            "id": t["id"],
+            "name": t["name"],
+            "description": t.get("description", ""),
+            "question_count": len(t.get("questions", []))
+        })
     return jsonify(payload)
 
-
 @app.route("/api/tests/<test_id>/questions")
-def get_questions(test_id: str):
-    test = _get_test_or_404(test_id)
-    questions = list(test["questions"])
-    count_param = request.args.get("count")
-    if count_param:
-        try:
-            desired = int(count_param)
-            if desired > 0:
-                desired = min(desired, len(questions), MAX_QUESTIONS_PER_RUN)
-                questions = questions[:desired]
-        except ValueError:
-            pass
-    sanitized = [_serialize_question_payload(q) for q in questions]
-    return jsonify(
-        {
-            "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
-            "questions": sanitized,
-            "selected_count": len(sanitized),
-        }
-    )
+def get_questions(test_id):
+    all_t = _get_all_tests_for_session()
+    test = all_t.get(test_id)
+    if not test:
+        abort(404, "Test not found")
+        
+    qs = test["questions"]
+    count = request.args.get("count", type=int)
+    if count and count > 0:
+        qs = qs[:min(count, MAX_QUESTIONS_PER_RUN)]
+        
+    # Serialize
+    return jsonify({
+        "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
+        "questions": qs,
+        "selected_count": len(qs)
+    })
 
+@app.route("/api/tests/<test_id>/start_quiz", methods=["POST"])
+def start_quiz(test_id):
+    all_t = _get_all_tests_for_session()
+    test = all_t.get(test_id)
+    if not test:
+        abort(404, "Test not found")
+        
+    payload = request.json or {}
+    mode = payload.get("mode", "regular")
+    count = payload.get("count")
+    
+    questions = test["questions"]
+    
+    if mode == "review_incorrect":
+        sid = _get_session_id()
+        s_data = _load_session_data(sid)
+        missed_ids = set(s_data.get("missed", {}).get(test_id, []))
+        questions = [q for q in questions if q["id"] in missed_ids]
+        if not questions:
+            abort(400, "No missed questions recording for this test.")
+            
+    if count and isinstance(count, int) and count > 0:
+        questions = questions[:min(count, MAX_QUESTIONS_PER_RUN)]
+        
+    try:
+        limit = int(payload.get("time_limit_seconds", 0))
+    except:
+        limit = 0
+        
+    return jsonify({
+        "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
+        "questions": questions,
+        "selected_count": len(questions),
+        "mode": mode,
+        "time_limit_seconds": limit
+    })
 
 @app.route("/api/upload_pdf", methods=["POST"])
 def upload_pdf():
-    """Upload a PDF and store it only for the current session (no shared disk usage)."""
-    file = request.files.get("file")
-    if not file:
-        abort(400, description="No file provided.")
-    data = file.read()
-    if not data:
-        abort(400, description="Empty file.")
-    if len(data) > MAX_UPLOAD_BYTES:
-        abort(413, description=f"File too large (max {MAX_UPLOAD_BYTES // (1024*1024)} MB).")
-
-    try:
-        parsed = _parse_uploaded_pdf(data, file.filename)
-    except Exception as exc:
-        abort(400, description=f"Could not parse PDF: {exc}")
+    f = request.files.get("file")
+    if not f: abort(400, "No file")
+    
+    raw = f.read()
+    if len(raw) > MAX_UPLOAD_BYTES:
+        abort(413, "Too large")
+        
+    parsed = _parse_pdf_source(io.BytesIO(raw), f.filename.replace(".pdf", ""))
     if not parsed or not parsed.get("questions"):
-        abort(400, description="No questions found in this PDF.")
-
-    sid = _ensure_session_id()
-    # Enforce single active upload per session
-    _SESSION_UPLOADS[sid] = {}
-    _MISSED_BY_SESSION[sid] = {}
-    unique_id = f"u-{sid}-{uuid.uuid4().hex}"
-    parsed["id"] = unique_id
-    parsed["description"] = parsed.get("description") or f"Uploaded by you ({file.filename})"
-    _SESSION_UPLOADS.setdefault(sid, {})[unique_id] = parsed
-
-    return jsonify(
-        {
-            "id": parsed["id"],
-            "name": parsed["name"],
-            "description": parsed.get("description", ""),
-            "question_count": len(parsed.get("questions", [])),
-        }
-    )
-
-
-@app.route("/api/tests/<test_id>/start_quiz", methods=["POST"])
-def start_quiz(test_id: str):
-    test = _get_test_or_404(test_id)
-    payload = request.get_json(silent=True) or {}
-    raw_count = payload.get("count")
-    try:
-        count = int(raw_count) if raw_count is not None else None
-        if count is not None and count < 0:
-            count = None
-    except (TypeError, ValueError):
-        count = None
-    mode = payload.get("mode", "regular")
-    if mode not in {"regular", "review_incorrect"}:
-        mode = "regular"
-    questions = _select_questions_for_mode(test, mode, count=count)
-    if not questions:
-        if mode == "review_incorrect":
-            abort(400, description="No missed questions recorded yet for this test.")
-        abort(400, description="No questions available for this request.")
-    try:
-        time_limit_seconds = int(payload.get("time_limit_seconds", 0))
-        if time_limit_seconds < 0:
-            time_limit_seconds = 0
-        max_seconds = max(0, MAX_TIME_LIMIT_MINUTES * 60)
-        if max_seconds:
-            time_limit_seconds = min(time_limit_seconds, max_seconds)
-    except (TypeError, ValueError):
-        time_limit_seconds = 0
-    return jsonify(
-        {
-            "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
-            "questions": questions,
-            "selected_count": len(questions),
-            "mode": mode,
-            "time_limit_seconds": time_limit_seconds,
-        }
-    )
-
-
-@app.route("/api/tests/<test_id>/review_missed")
-def review_missed(test_id: str):
-    test = _get_test_or_404(test_id)
-    missed_map = _get_missed_map()
-    missed_for_test = missed_map.get(test_id, [])
-    raw_count = request.args.get("count")
-    try:
-        count = int(raw_count) if raw_count else None
-    except (TypeError, ValueError):
-        count = None
-    questions = _select_questions_for_mode(test, mode="review_incorrect", count=count)
-    if not questions or not missed_for_test:
-        abort(404, description="No missed questions stored for this test yet.")
-    return jsonify(
-        {
-            "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
-            "questions": questions,
-            "selected_count": len(questions),
-            "mode": "review_incorrect",
-            "time_limit_seconds": 0,
-        }
-    )
-
-
-@app.route("/api/tests/<test_id>/results", methods=["POST"])
-def store_results(test_id: str):
-    test = _get_test_or_404(test_id)
-    missed_map = _get_missed_map()
-    payload = request.get_json(silent=True) or {}
-    results = payload.get("results")
-    if not isinstance(results, list):
-        abort(400, description="'results' must be a list.")
-    missed_questions = get_incorrect_questions(test, results)
-    missed_map[test["id"]] = [item["id"] for item in missed_questions]
-    return jsonify({"missed_count": len(missed_questions)})
-
+        abort(400, "Could not parse questions from PDF")
+        
+    # Inject session-specific ID
+    sid = _get_session_id()
+    # Unique ID for this specific upload to prevent collisions
+    uid = f"u-{uuid.uuid4().hex[:8]}"
+    parsed["id"] = uid
+    parsed["name"] = f.filename
+    
+    # Update question IDs to match the test ID
+    for q in parsed["questions"]:
+        q["id"] = f"{uid}-q{q['number']}"
+    
+    # Save to disk
+    data = _load_session_data(sid)
+    data["uploads"][uid] = parsed
+    _save_session_data(sid, data)
+    
+    return jsonify({
+        "id": uid,
+        "name": parsed["name"],
+        "question_count": len(parsed["questions"])
+    })
 
 @app.route("/api/tests/<test_id>/check/<question_id>", methods=["POST"])
-def check_answer(test_id: str, question_id: str):
-    test = _get_test_or_404(test_id)
-    question = _get_question_or_404(test, question_id)
-    payload = request.get_json(silent=True) or {}
-    if "choice" not in payload:
-        abort(400, description="Missing 'choice' in request body.")
-    try:
-        choice_index = int(payload["choice"])
-    except Exception:
-        abort(400, description="'choice' must be an integer.")
-    if choice_index < 0 or choice_index >= len(question["options"]):
-        abort(400, description="Choice index is out of range.")
-    is_correct = choice_index == question["correct_index"]
+def check_answer(test_id, question_id):
+    # This endpoint is stateless logic, we just need the correct index
+    # But we need the test data to know the correct index
+    all_t = _get_all_tests_for_session()
+    test = all_t.get(test_id)
+    if not test: abort(404, "Test not found")
+    
+    q = next((x for x in test["questions"] if x["id"] == question_id), None)
+    if not q: abort(404, "Question not found")
+    
+    choice = request.json.get("choice")
+    if choice is None: abort(400, "Choice required")
+    
+    is_correct = (choice == q["correct_index"])
     return jsonify({"correct": is_correct})
 
+@app.route("/api/tests/<test_id>/results", methods=["POST"])
+def store_results(test_id):
+    sid = _get_session_id()
+    results = request.json.get("results", [])
+    if not results: return jsonify({"missed_count": 0})
+    
+    # Identify missed IDs
+    missed_ids = []
+    for r in results:
+        if r.get("correct") is False:
+            missed_ids.append(r.get("question_id"))
+            
+    # Persist
+    data = _load_session_data(sid)
+    if "missed" not in data: data["missed"] = {}
+    
+    # Overwrite misted list for this test? Or append? 
+    # Usually we want the latest set of missed questions to review
+    data["missed"][test_id] = missed_ids
+    _save_session_data(sid, data)
+    
+    return jsonify({"missed_count": len(missed_ids)})
 
 @app.route("/api/tests/<test_id>/answer/<question_id>")
-def reveal_answer(test_id: str, question_id: str):
-    test = _get_test_or_404(test_id)
-    question = _get_question_or_404(test, question_id)
-    return jsonify(
-        {
-            "correct_index": question["correct_index"],
-            "correct_letter": question.get("correct_letter", ""),
-            "explanation": question.get("explanation", ""),
-        }
-    )
-
-
-@app.route("/health")
-def health():
-    return jsonify({"status": "ok"}), 200
-
+def get_answer_details(test_id, question_id):
+    all_t = _get_all_tests_for_session()
+    test = all_t.get(test_id)
+    if not test: abort(404)
+    q = next((x for x in test["questions"] if x["id"] == question_id), None)
+    if not q: abort(404)
+    
+    return jsonify({
+        "correct_index": q["correct_index"],
+        "correct_letter": q["correct_letter"],
+        "explanation": q["explanation"]
+    })
 
 if __name__ == "__main__":
-    host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8080"))  # Replit sets PORT; fallback 8080 for local
-    app.run(host=host, port=port, debug=False)
+    app.run(debug=True, port=8080)
