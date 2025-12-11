@@ -362,12 +362,12 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
             if opt["label"].upper() == ans_letter:
                 correct_index = idx
                 break
-        if correct_index is None:
-            fallback_idx = ord(ans_letter) - ord("A")
-            if 0 <= fallback_idx < len(q["options"]):
-                correct_index = fallback_idx
-        if correct_index is None:
-            continue
+        fallback_idx = ord(ans_letter) - ord("A")
+        if correct_index is None and 0 <= fallback_idx < len(q["options"]):
+            correct_index = fallback_idx
+        # As a last resort, keep the question with a safe index to avoid dropping it entirely
+        if correct_index is None and q["options"]:
+            correct_index = min(len(q["options"]) - 1, max(0, fallback_idx if fallback_idx >= 0 else 0))
         seen_numbers.add(q["number"])
         paired.append(
             {

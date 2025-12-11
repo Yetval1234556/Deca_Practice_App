@@ -113,6 +113,16 @@ function setUploadStatus(message, isError = false) {
   uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
+function hideUnlockOverlay() {
+  if (!unlockOverlay) return;
+  unlockOverlay.classList.add("hidden");
+  setTimeout(() => {
+    if (unlockOverlay && unlockOverlay.parentElement) {
+      unlockOverlay.remove();
+    }
+  }, 600);
+}
+
 /**
  * --- HISTORY & ANALYTICS ---
  */
@@ -1329,10 +1339,13 @@ document.addEventListener("DOMContentLoaded", () => {
       setUploadStatus(uploadInput.files && uploadInput.files[0] ? uploadInput.files[0].name : "");
     });
   }
+  if (unlockOverlay) {
+    unlockOverlay.addEventListener("click", () => hideUnlockOverlay(), { once: true });
+  }
 
   // Back to home from summary uses resetState
   const backSumm = document.getElementById("back-to-home-summ");
-  if (backSumm) backSumm.onclick = () => {
+if (backSumm) backSumm.onclick = () => {
     resetState();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -1373,4 +1386,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Always fetch tests to populate sidebar
   fetchTests();
+
+  // Always hide the unlock overlay on load to avoid being stuck
+  hideUnlockOverlay();
 });

@@ -33,16 +33,6 @@
 </head>
 
 <body>
-  <div id="unlock-overlay" class="unlock-overlay">
-    <div class="unlock-content">
-      <i class="ph-duotone ph-play-circle symbol"></i>
-      <h1>DECA Practice Lab</h1>
-      <p>Click to open and start your session.</p>
-      <button id="unlock-start-btn" class="primary unlock-action" type="button">
-        <i class="ph ph-play"></i> Enter
-      </button>
-    </div>
-  </div>
   <script>
     window.DEFAULT_RANDOM_ORDER = {{ "true" if default_random_order else "false" }};
   </script>
@@ -62,10 +52,6 @@
         <span class="dot"></span>
         <span>Local & Private</span>
       </div>
-      <button class="btn-icon" id="audio-toggle-btn" title="Toggle Music">
-        <i class="ph ph-speaker-slash"></i>
-      </button>
-      <div id="audio-player-placeholder" style="display:none;"></div>
       <button class="btn-nav" onclick="openSettings()">
         <i class="ph ph-gear"></i> Settings
       </button>
@@ -291,27 +277,11 @@
             </div>
           </section>
 
-          <!-- Audio -->
-          <section class="panel">
-            <div class="setting-header">
-              <i class="ph-duotone ph-speaker-high symbol-small"></i>
-              <div class="setting-title">
-                <h4>Background Music</h4>
-                <p class="muted small">Play Lofi beats while studying.</p>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="global-audio-toggle">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </section>
         </div>
       </main>
     </div>
   </div>
 
-  <script src="{{ url_for('static', filename='audio.js') }}"></script>
-  <script src="{{ url_for('static', filename='bg-music.js') }}"></script>
   <script src="{{ url_for('static', filename='theme.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
