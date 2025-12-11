@@ -805,7 +805,20 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     updateProgress();
     updateSessionMeta();
   } catch (err) {
-    questionArea.innerHTML = `<div class="placeholder"><p class="muted">${escapeHtml(err.message || "Unable to load test")}</p></div>`;
+    const isNotFound = err.message.includes("not found") || err.message.includes("404");
+    const helpText = isNotFound
+      ? "Tests store in memory may be lost if the server restarted. Please <strong>reload the page</strong> or <strong>re-upload the PDF</strong>."
+      : "Please try reloading the page.";
+    questionArea.innerHTML = `
+      <div class="placeholder">
+        <div class="empty-state-icon" style="color: var(--danger)">
+          <i class="ph-duotone ph-warning-circle"></i>
+        </div>
+        <h3>Error Loading Test</h3>
+        <p class="muted">${escapeHtml(err.message || "Unable to load test")}</p>
+        <p class="small" style="margin-top:10px; color: var(--text-muted);">${helpText}</p>
+        <button onclick="fetchTests()" class="secondary" style="margin-top:16px"><i class="ph ph-arrows-clockwise"></i> Reload List</button>
+      </div>`;
   }
 }
 
@@ -1137,10 +1150,12 @@ async function handleAnswer(question, choiceIndex) {
   } catch (err) {
     const feedbackEl = document.getElementById("feedback");
     if (feedbackEl) {
-      feedbackEl.textContent = err.message;
-      feedbackEl.classList.remove("correct", "incorrect");
+      feedbackEl.textContent = `Error: ${err.message}. Try again?`;
+      feedbackEl.className = "feedback incorrect";
+      feedbackEl.style.display = "block"; // Ensure visibility
     }
-    startQuestionTimer();
+    // Don't restart timer immediately so user sees error
+    console.error("Submission failed:", err);
     persistSession();
   }
 }
@@ -1274,8 +1289,8 @@ async function showSummary(forceShowExplanations) {
       const explanationHtml =
         showExplanation && status.explanation !== undefined
           ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
-              status.explanation || "No explanation provided."
-            )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
+            status.explanation || "No explanation provided."
+          )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
           : `<div class="explanation muted">Time: ${formatMs(timeTaken)}</div>`;
 
       const item = document.createElement("div");
@@ -1429,7 +1444,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Back to home from summary uses resetState
   const backSumm = document.getElementById("back-to-home-summ");
-if (backSumm) backSumm.onclick = () => {
+  if (backSumm) backSumm.onclick = () => {
     resetState();
     window.scrollTo({ top: 0, behavior: "smooth" });
   };

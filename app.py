@@ -31,6 +31,9 @@ def _normalize_whitespace(text: str) -> str:
     """Collapse excessive whitespace and trim."""
     if not isinstance(text, str):
         return ""
+    # Fix common broken words like "agree ment", "environ ment", "manage ment"
+    # This regex looks for a word char, space, and a suffix common in these docs.
+    text = re.sub(r"(\w)\s+(ment|tion|ing|able|ible)\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
@@ -168,7 +171,7 @@ def _parse_question_blocks(text: str) -> List[Dict[str, Any]]:
 
 def _split_inline_options(text: str) -> tuple[str, List[Dict[str, str]]]:
     """Split options embedded on the same line as the question or another option."""
-    opt_pattern = re.compile(r"([A-E])[\).:\-]\s*")
+    opt_pattern = re.compile(r"(?<!\w)([A-E])[\).:\-]\s+(?=\S)")
     matches = list(opt_pattern.finditer(text))
     if not matches:
         return text.strip(), []
@@ -420,16 +423,28 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
     lines = _lines_from_pdf(source, footer_hint=normalized_name_hint)
     if not lines:
         return {}
+    
+    # 1. Re-join split words (naive heuristic for common PDF copy-paste issues)
+    # e.g. "agree ment" -> "agreement" if "agreement" is a valid word, but here we just look for specific patterns
+    # or just aggressively join small gaps. For now, let's fix the specific "agree ment" type issues 
+    # by using a regex that looks for lowercase-space-lowercase that might be a split word. 
+    # A full dictionary check is too heavy, so we'll target common 2-letter splits or just rely on better tokenizing.
+    # Actually, a safer bet is to fix it in the final questions list or prompt text.
+    
     text = "\n".join(lines)
     answer_start = _find_answer_section_start(lines)
     answers = _parse_answer_key(lines, answer_start, text)
     sources: List[List[Dict[str, Any]]] = []
+    
+    # Try block parsing first (most reliable for standard DECA formats)
     block_parsed = _parse_question_blocks(text)
     if block_parsed:
         sources.append(block_parsed)
+        
     stop_parsed = _parse_questions(lines, stop=answer_start)
     if stop_parsed:
         sources.insert(0, stop_parsed)  # prefer clean split before answer key
+        
     full_parsed = _parse_questions(lines)
     if full_parsed:
         sources.append(full_parsed)
@@ -437,8 +452,11 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
     merged: Dict[int, Dict[str, Any]] = {}
     for source_block in sources:
         for q in source_block:
-            if q["number"] not in merged and q.get("options"):
+            # Prefer blocks that have options
+            if q["number"] not in merged:
                 merged[q["number"]] = q
+            elif not merged[q["number"]].get("options") and q.get("options"):
+                 merged[q["number"]] = q
 
     questions_raw = list(merged.values())
     # Clean up whitespace noise on prompts and options

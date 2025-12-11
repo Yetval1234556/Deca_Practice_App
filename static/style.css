@@ -342,27 +342,49 @@ body {
 }
 
 @media (max-width: 640px) {
+
   .panel,
   .card {
     padding: 20px;
   }
+
+  h1 {
+    font-size: 1.75rem;
+  }
+
+  h2 {
+    font-size: 1.5rem;
+  }
+
+  .active-test {
+    font-size: 1rem;
+  }
+
+  .question-text {
+    font-size: 1.15rem;
+  }
+
   .topbar {
     gap: 10px;
   }
+
   .topbar-actions {
     flex-wrap: wrap;
     height: auto;
     justify-content: flex-start;
   }
+
   .test-actions {
     flex-direction: column;
     align-items: stretch;
   }
+
   .test-actions button,
   .test-actions select,
   .test-actions input {
     width: 100%;
   }
+
   .time-input-row .time-select {
     width: 100%;
   }
@@ -1025,7 +1047,7 @@ button,
   justify-content: center;
   align-items: flex-start;
   padding: 32px 16px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(16, 185, 129, 0.08)) , var(--bg-surface);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.18), rgba(16, 185, 129, 0.08)), var(--bg-surface);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   overflow-y: auto;
