@@ -925,6 +925,29 @@ button,
   margin-top: 16px;
 }
 
+.upload-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 10px 0;
+}
+
+.upload-box input[type="file"] {
+  border: 1px solid var(--card-border);
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-main);
+}
+
+.upload-box .muted.small {
+  font-size: 0.8rem;
+}
+
+.upload-box .error {
+  color: var(--danger);
+}
+
 /* Summary Area */
 .summary-header {
   display: flex;

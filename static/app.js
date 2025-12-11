@@ -62,6 +62,9 @@ const summaryNote = document.getElementById("summary-note");
 const sessionFooter = document.getElementById("session-footer");
 const summaryChart = document.getElementById("summary-chart");
 const chartCanvas = document.getElementById("performance-chart");
+const uploadInput = document.getElementById("pdf-upload-input");
+const uploadBtn = document.getElementById("pdf-upload-btn");
+const uploadStatus = document.getElementById("pdf-upload-status");
 
 let performanceChartInstance = null; // Chart.js instance
 let settingsOpenedFromHash = false;
@@ -102,6 +105,12 @@ function formatMs(ms) {
   const minutes = Math.floor(totalSeconds / 60).toString().padStart(2, "0");
   const seconds = (totalSeconds % 60).toString().padStart(2, "0");
   return `${minutes}:${seconds}`;
+}
+
+function setUploadStatus(message, isError = false) {
+  if (!uploadStatus) return;
+  uploadStatus.textContent = message || "";
+  uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
 /**
@@ -533,7 +542,7 @@ function normalizeTimeLimitInput(value) {
 function renderTestList() {
   testListEl.innerHTML = "";
   if (!state.tests.length) {
-    testListEl.innerHTML = `<p class="muted">No tests found. Add DECA PDFs to <code>tests/</code> and reload.</p>`;
+    testListEl.innerHTML = `<p class="muted">No tests yet. Upload a DECA PDF to begin.</p>`;
     return;
   }
   state.tests.forEach((test) => {
@@ -607,6 +616,36 @@ function renderTestList() {
 
     testListEl.appendChild(card);
   });
+}
+
+async function handleUpload() {
+  if (!uploadInput || !uploadInput.files || !uploadInput.files[0]) {
+    setUploadStatus("Choose a PDF first.", true);
+    return;
+  }
+  const file = uploadInput.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+  setUploadStatus("Uploading...", false);
+  uploadBtn.disabled = true;
+  try {
+    const res = await fetch("/api/upload_pdf", {
+      method: "POST",
+      body: formData,
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) {
+      const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
+      throw new Error(msg);
+    }
+    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
+    uploadInput.value = "";
+    fetchTests();
+  } catch (err) {
+    setUploadStatus(err.message || "Upload failed.", true);
+  } finally {
+    uploadBtn.disabled = false;
+  }
 }
 
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
@@ -1045,14 +1084,14 @@ async function showSummary(forceShowExplanations) {
   state.sessionComplete = true;
   clearInterval(state.timerInterval);
   updateSessionMeta();
-  state.showAllExplanations = Boolean(forceShowExplanations);
 
   // Persist history once
   if (!state.resultsPersisted) {
     saveSessionToHistory();
-    state.resultsPersisted = true;
   }
-  persistResults(); // fire-and-forget; best effort
+  await persistResults();
+  state.resultsPersisted = true;
+  state.showAllExplanations = Boolean(forceShowExplanations);
 
   // UI Updates
   questionArea.classList.add("hidden");
@@ -1284,6 +1323,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if (questionGridToggle) questionGridToggle.addEventListener("click", toggleQuestionGrid);
   if (restartBtn) restartBtn.addEventListener("click", () => window.location.reload());
   if (backToTestsBtn) backToTestsBtn.addEventListener("click", () => window.location.reload());
+  if (uploadBtn) uploadBtn.addEventListener("click", handleUpload);
+  if (uploadInput) {
+    uploadInput.addEventListener("change", () => {
+      setUploadStatus(uploadInput.files && uploadInput.files[0] ? uploadInput.files[0].name : "");
+    });
+  }
 
   // Back to home from summary uses resetState
   const backSumm = document.getElementById("back-to-home-summ");

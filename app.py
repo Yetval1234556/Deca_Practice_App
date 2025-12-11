@@ -1,10 +1,13 @@
+import io
 import json
 import os
 import re
+import tempfile
+import uuid
 from pathlib import Path
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, IO
 
-from flask import Flask, jsonify, render_template, request, abort, redirect, url_for
+from flask import Flask, jsonify, render_template, request, abort, redirect, url_for, session
 from pypdf import PdfReader
 from werkzeug.exceptions import HTTPException
 
@@ -13,8 +16,11 @@ TESTS_DIR = BASE_DIR / "tests"
 MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
 MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
 DEFAULT_RANDOM_ORDER = os.getenv("DEFAULT_RANDOM_ORDER", "false").lower() in {"1", "true", "yes", "on"}
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))  # 12 MB default
+SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
+app.secret_key = SECRET_KEY
 
 
 @app.errorhandler(HTTPException)
@@ -41,7 +47,7 @@ def _json_generic_error(exc: Exception):
     raise exc
 
 
-def _lines_from_pdf(path: Path, footer_hint: Optional[str] = None) -> List[str]:
+def _lines_from_pdf(source: Path | IO[bytes], footer_hint: Optional[str] = None) -> List[str]:
     """Extract lines from a PDF while preserving order and trimming repeated footer noise."""
     def _looks_like_header_line(text: str) -> bool:
         patterns = [
@@ -59,7 +65,7 @@ def _lines_from_pdf(path: Path, footer_hint: Optional[str] = None) -> List[str]:
         if len(tokens) >= 4 and all(tok.isupper() or re.fullmatch(r"[A-Z0-9\-]+", tok) for tok in tokens):
             return True
         return False
-    reader = PdfReader(str(path))
+    reader = PdfReader(source)
     lines: List[str] = []
     footer_tokens: List[str] = []
     if footer_hint:
@@ -377,9 +383,25 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
     return paired
 
 
+def _slugify(value: str, fallback: str = "test") -> str:
+    slug = re.sub(r"[^a-zA-Z0-9_\-]+", "-", value).strip("-").lower()
+    return slug or fallback
+
+
+def _parse_uploaded_pdf(file_bytes: bytes, filename: str) -> Dict[str, Any]:
+    name_hint = Path(filename).stem if filename else "uploaded-test"
+    stream = io.BytesIO(file_bytes)
+    return _parse_pdf_source(stream, name_hint=name_hint, description_hint=f"Uploaded: {filename or 'PDF'}")
+
+
 def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
-    test_name_hint = re.sub(r"\s{2,}", " ", re.sub(r"[_\-]+", " ", path.stem)).strip()
-    lines = _lines_from_pdf(path, footer_hint=test_name_hint)
+    return _parse_pdf_source(path, name_hint=path.stem, description_hint=f"Parsed from {path.name}")
+
+
+def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint: Optional[str] = None) -> Dict[str, Any]:
+    """Parse a PDF from a path or file-like into a test structure."""
+    normalized_name_hint = re.sub(r"\s{2,}", " ", re.sub(r"[_\-]+", " ", name_hint)).strip() or "Uploaded Test"
+    lines = _lines_from_pdf(source, footer_hint=normalized_name_hint)
     if not lines:
         return {}
     text = "\n".join(lines)
@@ -397,29 +419,31 @@ def _parse_pdf_to_test(path: Path) -> Dict[str, Any]:
         sources.append(full_parsed)
 
     merged: Dict[int, Dict[str, Any]] = {}
-    for source in sources:
-        for q in source:
+    for source_block in sources:
+        for q in source_block:
             if q["number"] not in merged and q.get("options"):
                 merged[q["number"]] = q
 
     questions_raw = list(merged.values())
-    test_id = path.stem
+    test_id = re.sub(r"[^a-zA-Z0-9_\-]+", "-", normalized_name_hint).strip("-").lower() or "uploaded"
     questions = _attach_answers(test_id, questions_raw, answers)
     questions = [
         q for q in questions if isinstance(q.get("number"), int) and 1 <= q["number"] <= 100
     ]
     questions = sorted(questions, key=lambda q: q["number"])
-    display_name = test_name_hint.title() if test_name_hint else path.stem
+    display_name = normalized_name_hint.title()
     return {
         "id": test_id,
         "name": display_name,
-        "description": f"Parsed from {path.name}",
+        "description": description_hint or f"Parsed from {normalized_name_hint}",
         "questions": questions,
     }
 
 
 _CACHE: Dict[str, Any] = {"stamp": 0.0, "tests": {}, "files": []}
-_MISSED_BY_TEST: Dict[str, List[str]] = {}
+# Session-scoped uploaded tests and missed-question tracking
+_SESSION_UPLOADS: Dict[str, Dict[str, Any]] = {}
+_MISSED_BY_SESSION: Dict[str, Dict[str, List[str]]] = {}
 
 
 def load_all_tests() -> Dict[str, Dict[str, Any]]:
@@ -451,8 +475,28 @@ def load_all_tests() -> Dict[str, Dict[str, Any]]:
     return tests
 
 
+def _ensure_session_id() -> str:
+    sid = session.get("sid")
+    if not sid:
+        sid = uuid.uuid4().hex
+        session["sid"] = sid
+    return sid
+
+
+def _get_session_tests() -> Dict[str, Dict[str, Any]]:
+    sid = _ensure_session_id()
+    return _SESSION_UPLOADS.get(sid, {})
+
+
+def _get_all_tests_for_session() -> Dict[str, Dict[str, Any]]:
+    tests = dict(load_all_tests())
+    session_tests = _get_session_tests()
+    tests.update(session_tests)
+    return tests
+
+
 def _get_test_or_404(test_id: str) -> Dict[str, Any]:
-    tests = load_all_tests()
+    tests = _get_all_tests_for_session()
     test = tests.get(test_id)
     if not test:
         abort(404, description="Test not found")
@@ -490,12 +534,18 @@ def get_incorrect_questions(test: Dict[str, Any], results: List[Dict[str, Any]])
     return missed
 
 
+def _get_missed_map() -> Dict[str, List[str]]:
+    sid = _ensure_session_id()
+    return _MISSED_BY_SESSION.setdefault(sid, {})
+
+
 def _select_questions_for_mode(
     test: Dict[str, Any], mode: str = "regular", count: Optional[int] = None
 ) -> List[Dict[str, Any]]:
     questions = list(test["questions"])
     if mode == "review_incorrect":
-        missed_ids = set(_MISSED_BY_TEST.get(test["id"], []))
+        missed_map = _get_missed_map()
+        missed_ids = set(missed_map.get(test["id"], []))
         if not missed_ids:
             return []
         questions = [q for q in questions if q["id"] in missed_ids]
@@ -517,7 +567,7 @@ def settings():
 
 @app.route("/api/tests")
 def list_tests():
-    tests = load_all_tests()
+    tests = _get_all_tests_for_session()
     payload = []
     for test in tests.values():
         payload.append(
@@ -550,6 +600,41 @@ def get_questions(test_id: str):
             "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
             "questions": sanitized,
             "selected_count": len(sanitized),
+        }
+    )
+
+
+@app.route("/api/upload_pdf", methods=["POST"])
+def upload_pdf():
+    """Upload a PDF and store it only for the current session (no shared disk usage)."""
+    file = request.files.get("file")
+    if not file:
+        abort(400, description="No file provided.")
+    data = file.read()
+    if not data:
+        abort(400, description="Empty file.")
+    if len(data) > MAX_UPLOAD_BYTES:
+        abort(413, description=f"File too large (max {MAX_UPLOAD_BYTES // (1024*1024)} MB).")
+
+    try:
+        parsed = _parse_uploaded_pdf(data, file.filename)
+    except Exception as exc:
+        abort(400, description=f"Could not parse PDF: {exc}")
+    if not parsed or not parsed.get("questions"):
+        abort(400, description="No questions found in this PDF.")
+
+    sid = _ensure_session_id()
+    unique_id = f"u-{sid}-{uuid.uuid4().hex}"
+    parsed["id"] = unique_id
+    parsed["description"] = parsed.get("description") or f"Uploaded by you ({file.filename})"
+    _SESSION_UPLOADS.setdefault(sid, {})[unique_id] = parsed
+
+    return jsonify(
+        {
+            "id": parsed["id"],
+            "name": parsed["name"],
+            "description": parsed.get("description", ""),
+            "question_count": len(parsed.get("questions", [])),
         }
     )
 
@@ -596,13 +681,15 @@ def start_quiz(test_id: str):
 @app.route("/api/tests/<test_id>/review_missed")
 def review_missed(test_id: str):
     test = _get_test_or_404(test_id)
+    missed_map = _get_missed_map()
+    missed_for_test = missed_map.get(test_id, [])
     raw_count = request.args.get("count")
     try:
         count = int(raw_count) if raw_count else None
     except (TypeError, ValueError):
         count = None
     questions = _select_questions_for_mode(test, mode="review_incorrect", count=count)
-    if not questions:
+    if not questions or not missed_for_test:
         abort(404, description="No missed questions stored for this test yet.")
     return jsonify(
         {
@@ -618,12 +705,13 @@ def review_missed(test_id: str):
 @app.route("/api/tests/<test_id>/results", methods=["POST"])
 def store_results(test_id: str):
     test = _get_test_or_404(test_id)
+    missed_map = _get_missed_map()
     payload = request.get_json(silent=True) or {}
     results = payload.get("results")
     if not isinstance(results, list):
         abort(400, description="'results' must be a list.")
     missed_questions = get_incorrect_questions(test, results)
-    _MISSED_BY_TEST[test["id"]] = [item["id"] for item in missed_questions]
+    missed_map[test["id"]] = [item["id"] for item in missed_questions]
     return jsonify({"missed_count": len(missed_questions)})
 
 
@@ -664,5 +752,5 @@ def health():
 
 if __name__ == "__main__":
     host = os.getenv("HOST", "0.0.0.0")
-    port = int(os.getenv("PORT", "8080"))
+    port = int(os.getenv("PORT", "8080"))  # Replit sets PORT; fallback 8080 for local
     app.run(host=host, port=port, debug=False)

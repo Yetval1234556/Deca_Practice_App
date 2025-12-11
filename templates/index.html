@@ -91,7 +91,15 @@
           <i class="ph ph-plus-circle"></i>
           <span>Add new tests</span>
         </div>
-        <p>Place DECA PDFs in <code>tests/</code>. Hit reload to import.</p>
+        <p>Upload a DECA PDF to practice privately. Files stay in your browser session only.</p>
+        <div class="upload-box">
+          <input type="file" id="pdf-upload-input" accept="application/pdf">
+          <button id="pdf-upload-btn" class="secondary" type="button">
+            <i class="ph ph-upload"></i> Upload PDF
+          </button>
+          <div id="pdf-upload-status" class="muted small"></div>
+        </div>
+        <p class="muted small">Need to re-use? Just upload again; nothing is stored on the server.</p>
       </div>
     </aside>
 
