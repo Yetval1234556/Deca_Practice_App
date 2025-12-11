@@ -64,4 +64,4 @@ Keep question numbers at the start of a line (for example `12) Question text` or
 
 ## Credits
 
-Background track: “BK - ICY (Official Music Video)” by BK (ensure you have rights to use this audio). Icons: Phosphor Icons CDN. Fonts: Space Grotesk from Google Fonts. Charts: Chart.js. Confetti: canvas-confetti.
+Icons: Phosphor Icons CDN. Fonts: Space Grotesk from Google Fonts. Charts: Chart.js. Confetti: canvas-confetti.
