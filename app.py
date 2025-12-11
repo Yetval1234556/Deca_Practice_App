@@ -438,11 +438,14 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
     questions_raw = list(merged.values())
     # Clean up whitespace noise on prompts and options
     for q in questions_raw:
-        q["prompt"] = _normalize_whitespace(q.get("prompt", ""))
+        q_prompt = _normalize_whitespace(q.get("prompt", ""))
+        q["prompt"] = q_prompt
         cleaned_opts = []
         for opt in q.get("options", []):
             label = _normalize_whitespace(opt.get("label", ""))
             text = _normalize_whitespace(opt.get("text", ""))
+            if q_prompt and text.startswith(q_prompt):
+                text = _normalize_whitespace(text[len(q_prompt):].lstrip(":-— "))
             if label and text:
                 cleaned_opts.append({"label": label, "text": text})
         q["options"] = cleaned_opts
@@ -647,6 +650,9 @@ def upload_pdf():
         abort(400, description="No questions found in this PDF.")
 
     sid = _ensure_session_id()
+    # Enforce single active upload per session
+    _SESSION_UPLOADS[sid] = {}
+    _MISSED_BY_SESSION[sid] = {}
     unique_id = f"u-{sid}-{uuid.uuid4().hex}"
     parsed["id"] = unique_id
     parsed["description"] = parsed.get("description") or f"Uploaded by you ({file.filename})"

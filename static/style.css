@@ -712,6 +712,12 @@ select:focus {
   border-color: var(--primary);
 }
 
+.option-btn.striked {
+  opacity: 0.55;
+  text-decoration: line-through;
+  border-style: dashed;
+}
+
 .option-btn.selected {
   border-color: var(--primary);
   background: rgba(99, 102, 241, 0.1);

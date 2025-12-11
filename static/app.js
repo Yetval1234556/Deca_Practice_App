@@ -1001,7 +1001,12 @@ function renderQuestionCard() {
 
   const optionButtons = questionArea.querySelectorAll(".option-btn");
   optionButtons.forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", (e) => {
+      if (e.altKey || e.metaKey || e.ctrlKey) {
+        e.preventDefault();
+        btn.classList.toggle("striked");
+        return;
+      }
       const choice = Number(btn.dataset.idx);
       handleAnswer(question, choice);
     });
