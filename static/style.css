@@ -231,17 +231,12 @@ a:hover {
 
 /* Layout Structure */
 body {
-  padding: 20px;
-}
-
-@media (min-width: 1024px) {
-  body {
-    padding: 40px;
-  }
+  padding: clamp(16px, 4vw, 40px);
 }
 
 .topbar {
   max-width: 1200px;
+  width: min(1200px, 100%);
   margin: 0 auto 32px;
   display: flex;
   flex-direction: column;
@@ -312,6 +307,7 @@ body {
   position: relative;
   z-index: 10;
   max-width: 1200px;
+  width: min(1200px, 100%);
   margin: 0 auto;
   display: grid;
   gap: 24px;
@@ -320,6 +316,33 @@ body {
 @media (min-width: 900px) {
   .layout {
     grid-template-columns: 350px 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .panel,
+  .card {
+    padding: 20px;
+  }
+  .topbar {
+    gap: 10px;
+  }
+  .topbar-actions {
+    flex-wrap: wrap;
+    height: auto;
+    justify-content: flex-start;
+  }
+  .test-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .test-actions button,
+  .test-actions select,
+  .test-actions input {
+    width: 100%;
+  }
+  .time-input-row .time-select {
+    width: 100%;
   }
 }
 
@@ -442,6 +465,35 @@ select:focus {
   align-items: center;
   gap: 8px;
   font-size: 0.85rem;
+}
+
+.time-input-row .time-select {
+  width: 70px;
+  padding: 8px 10px;
+  border: 1.5px solid var(--card-border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  font-weight: 600;
+  text-align: center;
+  transition: var(--transition);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+[data-theme="light"] .time-input-row .time-select {
+  background: rgba(0, 0, 0, 0.02);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.08);
+}
+
+.time-input-row .time-select:focus {
+  outline: 2px solid var(--primary);
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.08);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+.time-input-row .time-select::placeholder {
+  color: var(--text-muted);
 }
 
 .instructions-header {
