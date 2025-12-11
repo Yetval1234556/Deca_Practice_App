@@ -1,5 +1,6 @@
 const SESSION_KEY = "deca-active-session-v1";
 const HISTORY_KEY = "deca-history-v1";
+const LOCAL_TESTS_KEY = "deca-local-tests-v1";
 const DEFAULT_TIME_LIMIT_MINUTES = 90;
 
 const state = {
@@ -95,6 +96,10 @@ function escapeHtml(str) {
   });
 }
 
+function tidyText(str) {
+  return (str || "").replace(/\s+/g, " ").trim();
+}
+
 function isRandomOrderEnabled() {
   const fallback = parseDefaultRandom();
   try {
@@ -128,6 +133,44 @@ function setUploadStatus(message, isError = false) {
   uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
+function localTestSummaries() {
+  return Array.from(localTests.values()).map((t) => ({
+    id: t.test?.id || t.id,
+    name: t.test?.name || t.name || "Uploaded Test",
+    description: t.description || "Client-cached test",
+    question_count: (t.questions && t.questions.length) || t.selected_count || 0,
+  }));
+}
+
+function persistLocalTests() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const payload = Array.from(localTests.entries()).map(([id, value]) => ({ id, value }));
+    localStorage.setItem(LOCAL_TESTS_KEY, JSON.stringify(payload));
+  } catch (err) {
+    console.warn("Could not persist cached tests", err);
+  }
+}
+
+function hydrateLocalTests() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(LOCAL_TESTS_KEY);
+    if (!raw) return;
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return;
+    localTests.clear();
+    list.forEach((entry) => {
+      if (entry && entry.id && entry.value && Array.isArray(entry.value.questions)) {
+        localTests.set(entry.id, entry.value);
+      }
+    });
+  } catch (err) {
+    console.warn("Could not restore cached tests", err);
+    localTests.clear();
+  }
+}
+
 /**
  * --- TEST LOADING & UPLOAD ---
  */
@@ -140,11 +183,25 @@ async function fetchTests() {
     const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("Failed to load tests");
     const data = await res.json();
-    state.tests = data;
+    const mergedIds = new Set();
+    const merged = [];
+    localTestSummaries().forEach((t) => {
+      mergedIds.add(t.id);
+      merged.push(t);
+    });
+    (data || []).forEach((t) => {
+      if (!mergedIds.has(t.id)) {
+        merged.push(t);
+      }
+    });
+    state.tests = merged;
     renderTestList();
   } catch (err) {
+    const merged = localTestSummaries();
+    state.tests = merged;
     if (testListEl) {
-      testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
+      const extra = merged.length ? "Showing cached uploads." : "";
+      testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}. ${extra}</p>`;
     }
   }
 }
@@ -178,11 +235,51 @@ async function handleUpload() {
       const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
       throw new Error(msg);
     }
-    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
+    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions). Caching...`);
     uploadInput.value = "";
-    state.tests = [...state.tests.filter((t) => t.id !== data.id), data];
+    // Replace list with the newest upload first (only one test active per session)
+    state.tests = [data, ...state.tests.filter((t) => t.id !== data.id)];
     renderTestList();
-    await refreshTestsWithRetry(2, 300);
+
+    // Prefetch full payload so we can start even if the server cache is lost
+    try {
+      const preload = await fetch(`/api/tests/${encodeURIComponent(data.id)}/start_quiz`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          count: 0,
+          mode: "regular",
+          time_limit_seconds: DEFAULT_TIME_LIMIT_MINUTES * 60,
+        }),
+      });
+      const preloadBody = await preload.text();
+      const preloadData = preloadBody ? JSON.parse(preloadBody) : null;
+      if (preload.ok && preloadData && Array.isArray(preloadData.questions) && preloadData.questions.length) {
+        const enriched = {
+          ...preloadData,
+          description: data.description || preloadData.description,
+          name: data.name || preloadData.name,
+        };
+        if (enriched.test) {
+          enriched.test.description = data.description || enriched.test.description;
+          enriched.test.name = data.name || enriched.test.name;
+        }
+        localTests.set(data.id, enriched);
+        persistLocalTests();
+        setUploadStatus(`Uploaded and cached "${data.name}". Ready to start.`);
+      } else {
+        localTests.delete(data.id);
+        persistLocalTests();
+        setUploadStatus(`Uploaded "${data.name}".`, false);
+      }
+    } catch (cacheErr) {
+      localTests.delete(data.id);
+      persistLocalTests();
+      setUploadStatus(`Uploaded "${data.name}".`, false);
+    }
+
+    await refreshTestsWithRetry(2, 350);
   } catch (err) {
     setUploadStatus(err.message || "Upload failed.", true);
   } finally {
@@ -609,83 +706,6 @@ function restoreSessionFromStorage() {
  * --- DATA FETCHING & UI RENDERING ---
  */
 
-async function fetchTests() {
-  if (testListEl) {
-    testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
-  }
-  try {
-    const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
-    if (!res.ok) throw new Error("Failed to load tests");
-    const data = await res.json();
-    state.tests = data;
-    renderTestList();
-  } catch (err) {
-    if (testListEl) {
-      testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
-    }
-  }
-}
-
-async function refreshTestsWithRetry(retries = 2, delayMs = 250) {
-  await fetchTests();
-  for (let i = 0; i < retries; i += 1) {
-    await new Promise((r) => setTimeout(r, delayMs));
-    await fetchTests();
-  }
-}
-
-async function handleUpload() {
-  if (!uploadInput || !uploadInput.files || !uploadInput.files[0]) {
-    setUploadStatus("Choose a PDF first.", true);
-    return;
-  }
-  const file = uploadInput.files[0];
-  const formData = new FormData();
-  formData.append("file", file);
-  setUploadStatus("Uploading...", false);
-  uploadBtn.disabled = true;
-  try {
-    const res = await fetch("/api/upload_pdf", {
-      method: "POST",
-      body: formData,
-      credentials: "same-origin",
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data) {
-      const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
-      throw new Error(msg);
-    }
-    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
-    uploadInput.value = "";
-    // Single active test: replace local list with just this upload
-    state.tests = [data];
-    renderTestList();
-    // Prefetch full test payload to cache locally for offline safety
-    try {
-      const preload = await fetch(`/api/tests/${encodeURIComponent(data.id)}/start_quiz`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ count: 0, mode: "regular", time_limit_seconds: DEFAULT_TIME_LIMIT_MINUTES * 60 }),
-      });
-      const preloadBody = await preload.text();
-      const preloadData = preloadBody ? JSON.parse(preloadBody) : null;
-      if (preload.ok && preloadData && preloadData.questions && preloadData.questions.length) {
-        localTests.set(data.id, preloadData);
-      } else {
-        localTests.delete(data.id);
-      }
-    } catch (e) {
-      localTests.delete(data.id);
-    }
-    await refreshTestsWithRetry(2, 250);
-  } catch (err) {
-    setUploadStatus(err.message || "Upload failed.", true);
-  } finally {
-    uploadBtn.disabled = false;
-  }
-}
-
 function normalizeTimeLimitInput(value) {
   const raw = (value || "").toString().trim();
   if (!raw) return { minutes: DEFAULT_TIME_LIMIT_MINUTES, display: `${DEFAULT_TIME_LIMIT_MINUTES}` };
@@ -811,8 +831,23 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
         throw err;
       }
     }
+    if (data && data.test && Array.isArray(data.questions) && data.questions.length) {
+      const existingMeta = state.tests.find((t) => t.id === testId) || localTests.get(testId) || {};
+      const enriched = {
+        ...data,
+        description: data.description || existingMeta.description,
+        name: data.name || existingMeta.name,
+      };
+      if (enriched.test) {
+        enriched.test.description = enriched.test.description || existingMeta.description;
+        enriched.test.name = enriched.test.name || existingMeta.name;
+      }
+      localTests.set(data.test.id, enriched);
+      persistLocalTests();
+    }
     state.isLocalActive = usedLocal;
-    state.activeTest = data.test;
+    const testMeta = data.test || { id: testId, name: data.name || "Uploaded Test", total: (data.questions || []).length };
+    state.activeTest = testMeta;
     state.mode = data.mode || mode || "regular";
     state.randomOrderEnabled = isRandomOrderEnabled();
     state.questions = state.randomOrderEnabled ? shuffleQuestions(data.questions || []) : data.questions || [];
@@ -821,7 +856,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.score = 0;
     state.answers = {};
     state.selectedCount = data.selected_count || state.questions.length;
-    state.totalAvailable = data.test?.total || state.questions.length;
+    state.totalAvailable = data.test?.total || testMeta.total || state.questions.length;
     state.showAllExplanations = false;
     state.perQuestionMs = {};
     const resolvedLimitSeconds = data.time_limit_seconds || enforcedMinutes * 60;
@@ -1078,7 +1113,7 @@ function renderQuestionCard() {
         <p class="eyebrow">
             Question ${state.currentIndex + 1} of ${state.questions.length} ${question.number ? `| #${question.number}` : ""}
         </p>
-        <div class="question-text">${escapeHtml(question.question)}</div>
+        <div class="question-text">${escapeHtml(tidyText(question.question))}</div>
       </div>
     </div>
     <div class="options">
@@ -1087,7 +1122,7 @@ function renderQuestionCard() {
         (option, idx) =>
           `<button class="option-btn" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
               <span class="kbd-hint">${letters[idx] || (idx + 1)}</span>
-              <strong>${String.fromCharCode(65 + idx)}.</strong> ${escapeHtml(option)}
+              <strong>${String.fromCharCode(65 + idx)}.</strong> ${escapeHtml(tidyText(option))}
             </button>`
       )
       .join("")}
@@ -1337,14 +1372,14 @@ async function showSummary(forceShowExplanations) {
       const explanationHtml =
         showExplanation && status.explanation !== undefined
           ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
-            status.explanation || "No explanation provided."
+            tidyText(status.explanation || "No explanation provided.")
           )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
           : `<div class="explanation muted">Time: ${formatMs(timeTaken)}</div>`;
 
       const item = document.createElement("div");
       item.className = "summary-item";
       item.innerHTML = `
-        <strong>#${q.number || idx + 1}:</strong> ${escapeHtml(q.question)}<br>
+        <strong>#${q.number || idx + 1}:</strong> ${escapeHtml(tidyText(q.question))}<br>
         <span class="${tone}">${label}</span>
         ${explanationHtml}
       `;
@@ -1363,7 +1398,7 @@ function renderExplanation(question, status) {
   if (!el || !status.explanation) return;
   el.innerHTML = `
     <strong>Correct Answer: ${status.correctLetter}</strong><br>
-    ${escapeHtml(status.explanation)}
+    ${escapeHtml(tidyText(status.explanation))}
   `;
   el.classList.remove("hidden");
 }
@@ -1477,6 +1512,15 @@ function setupToggle(id, key, defaultVal, onChange) {
 // Initialization
 document.addEventListener("DOMContentLoaded", () => {
   // Audio init is handled by bg-music.js
+
+  // Restore cached tests immediately so the deck list shows up without refresh spam
+  hydrateLocalTests();
+  if (localTests.size) {
+    state.tests = localTestSummaries();
+    if (typeof renderTestList === "function") {
+      renderTestList();
+    }
+  }
 
   if (reloadBtn) reloadBtn.addEventListener("click", fetchTests);
   if (toggleTimerBtn) toggleTimerBtn.addEventListener("click", toggleTimer);
