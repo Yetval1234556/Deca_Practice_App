@@ -34,6 +34,11 @@ def _normalize_whitespace(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
+def _strip_leading_number(text: str) -> str:
+    """Remove leading question/option numbers like '12. ' or 'A) '."""
+    return re.sub(r"^\s*(?:\d{1,3}|[A-E])\s*[).:\-]?\s*", "", text).strip()
+
+
 @app.errorhandler(HTTPException)
 def _json_http_error(exc: HTTPException):
     """Return consistent JSON errors for API routes."""
@@ -384,8 +389,8 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
             {
                 "id": f"{test_id}-q{q['number']}",
                 "number": q["number"],
-                "question": _normalize_whitespace(q.get("prompt", "")),
-                "options": [_normalize_whitespace(opt.get("text", "")) for opt in q["options"]],
+                "question": _normalize_whitespace(_strip_leading_number(q.get("prompt", ""))),
+                "options": [_normalize_whitespace(_strip_leading_number(opt.get("text", ""))) for opt in q["options"]],
                 "correct_index": correct_index,
                 "correct_letter": ans_letter,
                 "explanation": _normalize_whitespace(ans_blob.get("explanation", "")),
@@ -438,12 +443,12 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
     questions_raw = list(merged.values())
     # Clean up whitespace noise on prompts and options
     for q in questions_raw:
-        q_prompt = _normalize_whitespace(q.get("prompt", ""))
+        q_prompt = _normalize_whitespace(_strip_leading_number(q.get("prompt", "")))
         q["prompt"] = q_prompt
         cleaned_opts = []
         for opt in q.get("options", []):
             label = _normalize_whitespace(opt.get("label", ""))
-            text = _normalize_whitespace(opt.get("text", ""))
+            text = _normalize_whitespace(_strip_leading_number(opt.get("text", "")))
             if q_prompt and text.startswith(q_prompt):
                 text = _normalize_whitespace(text[len(q_prompt):].lstrip(":-— "))
             if label and text:

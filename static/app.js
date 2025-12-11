@@ -593,6 +593,65 @@ function restoreSessionFromStorage() {
  * --- DATA FETCHING & UI RENDERING ---
  */
 
+async function fetchTests() {
+  if (testListEl) {
+    testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
+  }
+  try {
+    const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) throw new Error("Failed to load tests");
+    const data = await res.json();
+    state.tests = data;
+    renderTestList();
+  } catch (err) {
+    if (testListEl) {
+      testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
+    }
+  }
+}
+
+async function refreshTestsWithRetry(retries = 2, delayMs = 250) {
+  await fetchTests();
+  for (let i = 0; i < retries; i += 1) {
+    await new Promise((r) => setTimeout(r, delayMs));
+    await fetchTests();
+  }
+}
+
+async function handleUpload() {
+  if (!uploadInput || !uploadInput.files || !uploadInput.files[0]) {
+    setUploadStatus("Choose a PDF first.", true);
+    return;
+  }
+  const file = uploadInput.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+  setUploadStatus("Uploading...", false);
+  uploadBtn.disabled = true;
+  try {
+    const res = await fetch("/api/upload_pdf", {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) {
+      const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
+      throw new Error(msg);
+    }
+    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
+    uploadInput.value = "";
+    // Single active test: replace local list with just this upload
+    state.tests = [data];
+    renderTestList();
+    await refreshTestsWithRetry(2, 250);
+  } catch (err) {
+    setUploadStatus(err.message || "Upload failed.", true);
+  } finally {
+    uploadBtn.disabled = false;
+  }
+}
+
 function normalizeTimeLimitInput(value) {
   const raw = (value || "").toString().trim();
   if (!raw) return { minutes: DEFAULT_TIME_LIMIT_MINUTES, display: `${DEFAULT_TIME_LIMIT_MINUTES}` };
