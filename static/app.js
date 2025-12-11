@@ -66,6 +66,19 @@ const uploadInput = document.getElementById("pdf-upload-input");
 const uploadBtn = document.getElementById("pdf-upload-btn");
 const uploadStatus = document.getElementById("pdf-upload-status");
 
+// Fallback for removed audio system
+if (!window.sfx) {
+  window.sfx = {
+    enabled: false,
+    playClick() { },
+    playHover() { },
+    playSelect() { },
+    playCorrect() { },
+    playIncorrect() { },
+    playFanfare() { },
+  };
+}
+
 let performanceChartInstance = null; // Chart.js instance
 let settingsOpenedFromHash = false;
 
@@ -113,17 +126,7 @@ function setUploadStatus(message, isError = false) {
   uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
-function hideUnlockOverlay() {
-  if (!unlockOverlay) return;
-  unlockOverlay.classList.add("hidden");
-  setTimeout(() => {
-    if (unlockOverlay && unlockOverlay.parentElement) {
-      unlockOverlay.remove();
-    }
-  }, 600);
-}
-
-/**
+/** 
  * --- HISTORY & ANALYTICS ---
  */
 
@@ -1339,9 +1342,6 @@ document.addEventListener("DOMContentLoaded", () => {
       setUploadStatus(uploadInput.files && uploadInput.files[0] ? uploadInput.files[0].name : "");
     });
   }
-  if (unlockOverlay) {
-    unlockOverlay.addEventListener("click", () => hideUnlockOverlay(), { once: true });
-  }
 
   // Back to home from summary uses resetState
   const backSumm = document.getElementById("back-to-home-summ");
@@ -1387,6 +1387,4 @@ if (backSumm) backSumm.onclick = () => {
   // Always fetch tests to populate sidebar
   fetchTests();
 
-  // Always hide the unlock overlay on load to avoid being stuck
-  hideUnlockOverlay();
 });
