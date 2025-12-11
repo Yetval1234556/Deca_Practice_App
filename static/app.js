@@ -619,9 +619,6 @@ function renderTestList() {
 
     startBtn.addEventListener("click", () => {
       if (window.sfx) window.sfx.playSelect();
-      if (typeof window.unlockAudioAndPlay === "function") {
-        window.unlockAudioAndPlay();
-      }
       const count = Number(selectEl.value);
       const parsed = normalizeTimeLimitInput(timeSelect.value);
       startTest(test.id, count, "regular", parsed.minutes);
