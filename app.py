@@ -21,6 +21,10 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = SECRET_KEY
+app.config.update(
+    MAX_CONTENT_LENGTH=MAX_UPLOAD_BYTES,
+    SESSION_TYPE="filesystem",
+)
 
 
 @app.errorhandler(HTTPException)
@@ -480,6 +484,7 @@ def _ensure_session_id() -> str:
     if not sid:
         sid = uuid.uuid4().hex
         session["sid"] = sid
+        session.modified = True
     return sid
 
 
