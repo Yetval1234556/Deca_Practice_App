@@ -126,6 +126,68 @@ function setUploadStatus(message, isError = false) {
   uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
+/**
+ * --- TEST LOADING & UPLOAD ---
+ */
+
+async function fetchTests() {
+  if (testListEl) {
+    testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
+  }
+  try {
+    const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
+    if (!res.ok) throw new Error("Failed to load tests");
+    const data = await res.json();
+    state.tests = data;
+    renderTestList();
+  } catch (err) {
+    if (testListEl) {
+      testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
+    }
+  }
+}
+
+async function refreshTestsWithRetry(retries = 2, delayMs = 300) {
+  await fetchTests();
+  for (let i = 0; i < retries; i += 1) {
+    await new Promise((r) => setTimeout(r, delayMs));
+    await fetchTests();
+  }
+}
+
+async function handleUpload() {
+  if (!uploadInput || !uploadInput.files || !uploadInput.files[0]) {
+    setUploadStatus("Choose a PDF first.", true);
+    return;
+  }
+  const file = uploadInput.files[0];
+  const formData = new FormData();
+  formData.append("file", file);
+  setUploadStatus("Uploading...", false);
+  uploadBtn.disabled = true;
+  try {
+    const res = await fetch("/api/upload_pdf", {
+      method: "POST",
+      body: formData,
+      credentials: "same-origin",
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok || !data) {
+      const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
+      throw new Error(msg);
+    }
+    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
+    uploadInput.value = "";
+    state.tests = [...state.tests.filter((t) => t.id !== data.id), data];
+    renderTestList();
+    await refreshTestsWithRetry(2, 300);
+  } catch (err) {
+    setUploadStatus(err.message || "Upload failed.", true);
+  } finally {
+    uploadBtn.disabled = false;
+  }
+}
+
 /** 
  * --- HISTORY & ANALYTICS ---
  */
@@ -443,6 +505,7 @@ async function persistResults() {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ results }),
       }
     );
@@ -463,7 +526,8 @@ async function ensureAnswerDetails(question) {
     return existing;
   }
   const res = await fetch(
-    `/api/tests/${encodeURIComponent(state.activeTest.id)}/answer/${encodeURIComponent(question.id)}`
+    `/api/tests/${encodeURIComponent(state.activeTest.id)}/answer/${encodeURIComponent(question.id)}`,
+    { credentials: "same-origin" }
   );
   if (!res.ok) throw new Error("Unable to load answer details");
   const data = await res.json();
@@ -528,19 +592,6 @@ function restoreSessionFromStorage() {
 /**
  * --- DATA FETCHING & UI RENDERING ---
  */
-
-async function fetchTests() {
-  testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
-  try {
-    const res = await fetch("/api/tests", { cache: "no-store" });
-    if (!res.ok) throw new Error("Failed to load tests");
-    const data = await res.json();
-    state.tests = data;
-    renderTestList();
-  } catch (err) {
-    testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}</p>`;
-  }
-}
 
 function normalizeTimeLimitInput(value) {
   const raw = (value || "").toString().trim();
@@ -628,42 +679,6 @@ function renderTestList() {
   });
 }
 
-async function handleUpload() {
-  if (!uploadInput || !uploadInput.files || !uploadInput.files[0]) {
-    setUploadStatus("Choose a PDF first.", true);
-    return;
-  }
-  const file = uploadInput.files[0];
-  const formData = new FormData();
-  formData.append("file", file);
-  setUploadStatus("Uploading...", false);
-  uploadBtn.disabled = true;
-  try {
-    const res = await fetch("/api/upload_pdf", {
-      method: "POST",
-      body: formData,
-    });
-    const data = await res.json().catch(() => null);
-    if (!res.ok || !data) {
-      const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
-      throw new Error(msg);
-    }
-    setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
-    uploadInput.value = "";
-    // Optimistically add to local list for instant display
-    state.tests = [
-      ...state.tests.filter((t) => t.id !== data.id),
-      data
-    ];
-    renderTestList();
-    await fetchTests(); // refresh from server to stay in sync
-  } catch (err) {
-    setUploadStatus(err.message || "Upload failed.", true);
-  } finally {
-    uploadBtn.disabled = false;
-  }
-}
-
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
   if (!testId) return;
   state.lastRequestedCount = count;
@@ -683,6 +698,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
       body: JSON.stringify(payload),
     });
     const bodyText = await res.text();
@@ -1036,6 +1052,7 @@ async function handleAnswer(question, choiceIndex) {
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({ choice: choiceIndex }),
       }
     );

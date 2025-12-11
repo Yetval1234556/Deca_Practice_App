@@ -27,6 +27,13 @@ app.config.update(
 )
 
 
+def _normalize_whitespace(text: str) -> str:
+    """Collapse excessive whitespace and trim."""
+    if not isinstance(text, str):
+        return ""
+    return re.sub(r"\s+", " ", text).strip()
+
+
 @app.errorhandler(HTTPException)
 def _json_http_error(exc: HTTPException):
     """Return consistent JSON errors for API routes."""
@@ -377,11 +384,11 @@ def _attach_answers(test_id: str, questions: List[Dict[str, Any]], answers: Dict
             {
                 "id": f"{test_id}-q{q['number']}",
                 "number": q["number"],
-                "question": q["prompt"].strip(),
-                "options": [opt["text"].strip() for opt in q["options"]],
+                "question": _normalize_whitespace(q.get("prompt", "")),
+                "options": [_normalize_whitespace(opt.get("text", "")) for opt in q["options"]],
                 "correct_index": correct_index,
                 "correct_letter": ans_letter,
-                "explanation": ans_blob.get("explanation", "").strip(),
+                "explanation": _normalize_whitespace(ans_blob.get("explanation", "")),
             }
         )
     return paired
@@ -429,6 +436,17 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
                 merged[q["number"]] = q
 
     questions_raw = list(merged.values())
+    # Clean up whitespace noise on prompts and options
+    for q in questions_raw:
+        q["prompt"] = _normalize_whitespace(q.get("prompt", ""))
+        cleaned_opts = []
+        for opt in q.get("options", []):
+            label = _normalize_whitespace(opt.get("label", ""))
+            text = _normalize_whitespace(opt.get("text", ""))
+            if label and text:
+                cleaned_opts.append({"label": label, "text": text})
+        q["options"] = cleaned_opts
+
     test_id = re.sub(r"[^a-zA-Z0-9_\-]+", "-", normalized_name_hint).strip("-").lower() or "uploaded"
     questions = _attach_answers(test_id, questions_raw, answers)
     questions = [
