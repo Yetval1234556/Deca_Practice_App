@@ -650,7 +650,7 @@ async function handleUpload() {
     }
     setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions).`);
     uploadInput.value = "";
-    fetchTests();
+    await fetchTests();
   } catch (err) {
     setUploadStatus(err.message || "Upload failed.", true);
   } finally {
