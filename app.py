@@ -38,8 +38,8 @@ def _normalize_whitespace(text: str) -> str:
 
 
 def _strip_leading_number(text: str) -> str:
-    """Remove leading question/option numbers like '12. ' or 'A) '."""
-    return re.sub(r"^\s*(?:\d{1,3}|[A-E])\s*[).:\-]?\s*", "", text).strip()
+    """Remove leading question/option numbers like '12.' or 'A)' but avoid stripping normal words."""
+    return re.sub(r"^\s*(?:\d{1,3}[).:\-]|[A-E][).:\-])\s*", "", text).strip()
 
 
 @app.errorhandler(HTTPException)
@@ -474,8 +474,6 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str, description_hint
         for opt in q.get("options", []):
             label = _normalize_whitespace(opt.get("label", ""))
             text = _normalize_whitespace(_strip_leading_number(opt.get("text", "")))
-            if q_prompt and text.startswith(q_prompt):
-                text = _normalize_whitespace(text[len(q_prompt):].lstrip(":-— "))
             if label and text:
                 cleaned_opts.append({"label": label, "text": text})
         q["options"] = cleaned_opts
