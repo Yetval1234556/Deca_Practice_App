@@ -161,7 +161,8 @@ function hydrateLocalTests() {
     if (!Array.isArray(list)) return;
     localTests.clear();
     list.forEach((entry) => {
-      if (entry && entry.id && entry.value && Array.isArray(entry.value.questions)) {
+      // Allow summaries (no questions array) to be cached too
+      if (entry && entry.id && entry.value) {
         localTests.set(entry.id, entry.value);
       }
     });
@@ -190,8 +191,14 @@ async function fetchTests() {
     (data || []).forEach((t) => {
       merged.push(t);
       serverIds.add(t.id);
-      // Optional: If server has it, we could clean it from localTests to avoid stale data
-      // localTests.delete(t.id); 
+
+      // Update local cache to ensure we have the list even offline
+      const existing = localTests.get(t.id);
+      // Only overwrite if existing is a summary (no questions) or if we prefer server truth
+      // We want to preserve 'existing.questions' if we have them (from a full upload/prefetch)
+      if (!existing || !existing.questions) {
+        localTests.set(t.id, t);
+      }
     });
 
     // 2. Add local uploads that are NOT on server
@@ -202,6 +209,7 @@ async function fetchTests() {
     });
 
     state.tests = merged;
+    persistLocalTests(); // Save the merged state (including server summaries)
     renderTestList();
   } catch (err) {
     const merged = localTestSummaries();
@@ -244,8 +252,18 @@ async function handleUpload() {
     }
     setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions). Caching...`);
     uploadInput.value = "";
+
+    // Enforce single upload: Clear previous uploads from local cache
+    // We assume test IDs starting with 'u-' are uploads.
+    for (const key of localTests.keys()) {
+      if (typeof key === 'string' && key.startsWith('u-')) {
+        localTests.delete(key);
+      }
+    }
+    persistLocalTests();
+
     // Replace list with the newest upload first (only one test active per session)
-    state.tests = [data, ...state.tests.filter((t) => t.id !== data.id)];
+    state.tests = [data, ...state.tests.filter((t) => t.id !== data.id && !t.id.startsWith('u-'))];
     renderTestList();
 
     // Prefetch full payload so we can start even if the server cache is lost
@@ -771,11 +789,16 @@ function renderTestList() {
         <button class="primary" data-test-id="${test.id}">
           <i class="ph ph-play"></i> Start
         </button>
+        <button class="ghost delete-btn" data-test-id="${test.id}" title="Remove from list">
+          <i class="ph ph-trash"></i>
+        </button>
       </div>
     `;
 
     // Bindings
-    const startBtn = card.querySelector("button");
+    const startBtn = card.querySelector("button.primary");
+    const deleteBtn = card.querySelector("button.ghost.delete-btn");
+
     const selectEl = card.querySelector(".count-select");
     const timeSelect = card.querySelector(".time-select");
 
@@ -795,8 +818,30 @@ function renderTestList() {
       startTest(test.id, count, "regular", parsed.minutes);
     });
 
+    if (deleteBtn) {
+      deleteBtn.addEventListener("click", () => {
+        deleteTest(test.id, test.name);
+      });
+    }
+
     testListEl.appendChild(card);
   });
+}
+
+function deleteTest(testId, name) {
+  if (!confirm(`Remove "${name}" from your list?`)) return;
+
+  // 1. Remove from state
+  state.tests = state.tests.filter(t => t.id !== testId);
+
+  // 2. Remove from local storage
+  localTests.delete(testId);
+  persistLocalTests();
+
+  // 3. Re-render
+  renderTestList();
+
+  // 4. (Optional) If active, maybe warn? But for now just removing from list is enough.
 }
 
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {

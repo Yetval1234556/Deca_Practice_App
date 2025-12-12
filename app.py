@@ -545,6 +545,8 @@ def upload_pdf():
     
     # Save to disk
     data = _load_session_data(sid)
+    # Enforce single upload: Clear previous uploads
+    data["uploads"] = {}
     data["uploads"][uid] = parsed
     _save_session_data(sid, data)
     
