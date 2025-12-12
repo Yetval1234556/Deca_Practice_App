@@ -165,7 +165,26 @@ def _parse_answer_key(lines: List[str]) -> Dict[int, Dict[str, str]]:
             start_idx = i
             break
     
-    # If not found, assume it's the last 20% of the file
+    # If not found, look for just "KEY" on a line by itself
+    if start_idx == -1:
+         for i in range(len(lines) - 1, -1, -1):
+            if lines[i].strip().upper() == "KEY":
+                start_idx = i
+                break
+
+    # If still not found, search for the first occurrence of "1. X" to guess start
+    if start_idx == -1:
+        # Scan last 60% of parsing just to be safe (answer keys usually in back half)
+        # But for 2017.pdf it starts at ~38% (573/1497). So let's search entire file backwards or forwards?
+        # Searching forwards from a reasonable midpoint (30%) might be safer.
+        search_start = int(len(lines) * 0.3)
+        pat_start = re.compile(r"^\s*1[\s.:]+[A-E]\b", re.IGNORECASE)
+        for i in range(search_start, len(lines)):
+             if pat_start.search(lines[i]):
+                 start_idx = i
+                 break
+
+    # If still not found, fallback to 80%
     if start_idx == -1:
         start_idx = max(0, int(len(lines) * 0.8))
 
@@ -344,9 +363,9 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             "number": num,
             "question": q["prompt"],
             "options": [o["text"] for o in q["options"]],
-            "correct_index": correct_idx,
-            "correct_letter": ans_letter,
-            "explanation": explanation
+            "correct_index": correct_idx if correct_idx is not None else 0,
+            "correct_letter": ans_letter if ans_letter else "?",
+            "explanation": explanation if explanation else "No explanation available (Parse failed)"
         })
         seen_ids.add(num)
         
