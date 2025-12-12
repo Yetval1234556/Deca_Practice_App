@@ -463,6 +463,13 @@ _STATIC_TESTS_CACHE = {}
 
 @app.route("/")
 def home():
+    # User requested that uploads be gone on reload. 
+    # Clear the session uploads whenever the main page is loaded.
+    sid = _get_session_id()
+    data = _load_session_data(sid)
+    if data.get("uploads"):
+        data["uploads"] = {}
+        _save_session_data(sid, data)
     return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
 @app.route("/settings")

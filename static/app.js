@@ -1566,7 +1566,34 @@ document.addEventListener("DOMContentLoaded", () => {
   // Audio init is handled by bg-music.js
 
   // Restore cached tests immediately so the deck list shows up without refresh spam
+
+  // User requested ephemeral uploads. Clear any cached uploads from previous session/reload.
+  try {
+    const keysToRemove = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      // Our upload IDs start with "u-" or we might have keys in "deca-local-tests" if using map?
+      // Use the hydrate logic to identify uploads if possible, or just iterate.
+      // Wait, localTests is a Map, but is it persisted item by item or as a blob?
+      // In persistLocalTests: localStorage.setItem(LOCAL_TESTS_KEY, JSON.stringify(Array.from(localTests.entries())));
+      // So we need to modify the hydration logic or clear the KEY itself?
+      // Ah, hydrateLocalTests() reads LOCAL_TESTS_KEY.
+      // So we should modify hydrateLocalTests to filtered out uploads if that's safer.
+      // But effectively we want to PURGE them.
+    }
+    // Actually, simplest is to filter them OUT immediately after hydration, or modifying hydrate.
+    // Let's modify the hydration call or logic.
+  } catch (e) { }
+
   hydrateLocalTests();
+  // FILTER OUT UPLOADS AFTER HYDRATION to ensure they are gone.
+  for (const key of localTests.keys()) {
+    if (typeof key === 'string' && key.startsWith('u-')) {
+      localTests.delete(key);
+    }
+  }
+  persistLocalTests(); // Save the clean state back to storage
+
   if (localTests.size) {
     state.tests = localTestSummaries();
     if (typeof renderTestList === "function") {
