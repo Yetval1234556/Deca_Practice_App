@@ -49,10 +49,10 @@
       </div>
     </div>
     <div class="topbar-actions">
-      <div class="pill">
-        <span class="dot"></span>
-        <span>Local & Private</span>
-      </div>
+
+      <button class="btn-nav" onclick="openCredits()">
+        <i class="ph ph-info"></i> Credits
+      </button>
       <button class="btn-nav" onclick="openSettings()">
         <i class="ph ph-gear"></i> Settings
       </button>
@@ -227,6 +227,24 @@
                 </span>
                 <div><strong>Ocean</strong></div>
               </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="sunset">
+                <span class="swatch" data-theme-preview="sunset">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Sunset</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="lavender">
+                <span class="swatch" data-theme-preview="lavender">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Lavender</strong></div>
+              </button>
+              <button class="theme-card" type="button" data-theme-option data-theme="terminal">
+                <span class="swatch" data-theme-preview="terminal">
+                  <span class="swatch-accent"></span><span class="swatch-bg"></span>
+                </span>
+                <div><strong>Terminal</strong></div>
+              </button>
             </div>
           </div>
         </section>
@@ -263,6 +281,21 @@
             </div>
           </section>
 
+          <!-- Timer Toggle -->
+          <section class="panel">
+            <div class="setting-header">
+              <i class="ph-duotone ph-timer symbol-small"></i>
+              <div class="setting-title">
+                <h4>Disable Timer</h4>
+                <p class="muted small">Hide the clock completely.</p>
+              </div>
+              <label class="toggle">
+                <input type="checkbox" id="disable-timer-toggle">
+                <span class="slider"></span>
+              </label>
+            </div>
+          </section>
+
           <!-- Performance -->
           <section class="panel">
             <div class="setting-header">
@@ -280,6 +313,58 @@
 
         </div>
       </main>
+    </div>
+  </div>
+
+  <!-- Credits Overlay -->
+  <div id="credits-overlay" class="settings-overlay hidden">
+    <div class="settings-modal" style="max-width: 600px; margin: auto;">
+      <div class="settings-topbar">
+        <div class="setting-header">
+          <div class="symbol-small" style="background: rgba(var(--primary), 0.1); color: var(--primary);">
+            <i class="ph ph-info"></i>
+          </div>
+          <div class="setting-title">
+            <h4>Credits & Guide</h4>
+            <p class="muted">About this project</p>
+          </div>
+          <button class="btn-icon" onclick="closeCredits()">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel" style="padding: 32px; text-align: center;">
+        <div class="placeholder" style="padding: 20px 0;">
+          <i class="ph ph-trophy empty-state-icon" style="color: #fbbf24; opacity: 1; animation: none;"></i>
+          <h2 style="font-size: 2rem; margin-bottom: 1rem; color: var(--text-main);">Win That Glass!</h2>
+          <p style="font-size: 1.1rem; line-height: 1.6; color: var(--text-muted); margin-bottom: 1.5rem;">
+            This tool was built by <strong>Yuval</strong> to help you crush your competitive events.
+          </p>
+
+          <div
+            style="background: var(--bg); padding: 20px; border-radius: var(--radius-md); text-align: left; border: 1px solid var(--card-border);">
+            <h4 style="color: var(--primary); margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+              <i class="ph ph-strategy"></i> Strategy to Win
+            </h4>
+            <ul
+              style="padding-left: 20px; color: var(--text-main); margin: 0; display: flex; flex-direction: column; gap: 8px;">
+              <li><strong>Practice Daily:</strong> Consistency is key. Even 10 questions a day helps.</li>
+              <li><strong>Review Explanations:</strong> Don't just check if you're right. Understand <em>why</em>.</li>
+              <li><strong>Submit & Verify:</strong> Use the "Submit" button to commit to your answers before seeing the
+                result.</li>
+              <li><strong>Focus on Weaknesses:</strong> Use the summary to identify areas where you struggle.</li>
+            </ul>
+          </div>
+
+          <div style="margin-top: 2rem;">
+            <p class="muted small">Built for the DECA community.</p>
+            <button class="primary" onclick="closeCredits()" style="margin-top: 16px;">
+              Let's Practice
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 

@@ -1,6 +1,6 @@
 (function () {
   const KEY = "deca-theme";
-  const THEMES = ["light", "dark", "midnight", "forest", "ocean"];
+  const THEMES = ["light", "dark", "midnight", "forest", "ocean", "sunset", "lavender", "terminal"];
 
   function applyTheme(value) {
     const normalized = typeof value === "string" ? value.toLowerCase() : "";

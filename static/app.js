@@ -10,6 +10,7 @@ const state = {
   currentIndex: 0,
   score: 0,
   answers: {},
+  currentSelection: null, // New: tracks un-submitted choice for current question
   selectedCount: 0,
   totalAvailable: 0,
   showAllExplanations: false,
@@ -67,7 +68,10 @@ const chartCanvas = document.getElementById("performance-chart");
 const uploadInput = document.getElementById("pdf-upload-input");
 const uploadBtn = document.getElementById("pdf-upload-btn");
 const uploadStatus = document.getElementById("pdf-upload-status");
-const localTests = new Map(); // cache server-parsed tests to avoid "not found" if session resets
+const localTests = new Map(); // cache server-parsed tests
+const hiddenTestIds = new Set(); // permanently hidden tests
+const HIDDEN_TESTS_KEY = "deca-hidden-tests";
+
 
 // Fallback for removed audio system
 if (!window.sfx) {
@@ -157,19 +161,37 @@ function hydrateLocalTests() {
   try {
     const raw = localStorage.getItem(LOCAL_TESTS_KEY);
     if (!raw) return;
-    const list = JSON.parse(raw);
-    if (!Array.isArray(list)) return;
+    const payload = JSON.parse(raw);
+    if (!Array.isArray(payload)) return;
     localTests.clear();
-    list.forEach((entry) => {
+    payload.forEach(item => {
       // Allow summaries (no questions array) to be cached too
-      if (entry && entry.id && entry.value) {
-        localTests.set(entry.id, entry.value);
+      if (item && item.id && item.value) {
+        localTests.set(item.id, item.value);
       }
     });
   } catch (err) {
-    console.warn("Could not restore cached tests", err);
+    console.warn("Could not load cached tests", err);
     localTests.clear();
   }
+}
+
+function persistHiddenTests() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    localStorage.setItem(HIDDEN_TESTS_KEY, JSON.stringify(Array.from(hiddenTestIds)));
+  } catch (e) { }
+}
+
+function hydrateHiddenTests() {
+  if (typeof localStorage === "undefined") return;
+  try {
+    const raw = localStorage.getItem(HIDDEN_TESTS_KEY);
+    if (raw) {
+      const arr = JSON.parse(raw);
+      arr.forEach(id => hiddenTestIds.add(id));
+    }
+  } catch (e) { }
 }
 
 /**
@@ -184,13 +206,11 @@ async function fetchTests() {
     const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
     if (!res.ok) throw new Error("Failed to load tests");
     const data = await res.json();
-    const merged = [];
-    const serverIds = new Set();
+    const serverTests = [];
 
     // 1. Add server tests (Source of Truth)
     (data || []).forEach((t) => {
-      merged.push(t);
-      serverIds.add(t.id);
+      serverTests.push(t);
 
       // Update local cache to ensure we have the list even offline
       const existing = localTests.get(t.id);
@@ -202,18 +222,18 @@ async function fetchTests() {
     });
 
     // 2. Add local uploads that are NOT on server
-    localTestSummaries().forEach((t) => {
-      if (!serverIds.has(t.id)) {
-        merged.push(t);
-      }
-    });
+    const locals = localTestSummaries();
+    // Unique by ID, local overrides server if collision (unlikely with u- prefix)
+    const combined = [...serverTests, ...locals.filter(lt => !serverTests.some(st => st.id === lt.id))];
 
-    state.tests = merged;
+    // Filter hidden
+    state.tests = combined.filter(t => !hiddenTestIds.has(t.id));
+
     persistLocalTests(); // Save the merged state (including server summaries)
     renderTestList();
   } catch (err) {
     const merged = localTestSummaries();
-    state.tests = merged;
+    state.tests = merged.filter(t => !hiddenTestIds.has(t.id)); // Still filter hidden tests
     if (testListEl) {
       const extra = merged.length ? "Showing cached uploads." : "";
       testListEl.innerHTML = `<p class="muted">Could not load tests. ${err.message}. ${extra}</p>`;
@@ -263,7 +283,14 @@ async function handleUpload() {
     persistLocalTests();
 
     // Replace list with the newest upload first (only one test active per session)
-    state.tests = [data, ...state.tests.filter((t) => t.id !== data.id && !t.id.startsWith('u-'))];
+    // Merge with local uploads
+    const locals = localTestSummaries();
+    // Unique by ID, local overrides server if collision (unlikely with u- prefix)
+    const combined = [data, ...locals.filter(lt => lt.id !== data.id && !lt.id.startsWith('u-'))];
+
+    // Filter hidden
+    state.tests = combined.filter(t => !hiddenTestIds.has(t.id));
+
     renderTestList();
 
     // Prefetch full payload so we can start even if the server cache is lost
@@ -435,6 +462,7 @@ function resetState() {
   state.activeTest = null;
   state.questions = [];
   state.answers = {};
+  state.currentSelection = null;
   state.currentIndex = 0;
   state.score = 0;
   state.selectedCount = 0;
@@ -506,11 +534,27 @@ function updateSessionMeta() {
  */
 
 function updateTimerDisplay() {
+  const timerBlock = document.querySelector(".timer-block");
+  const timerDisplay = document.getElementById("timer-display");
+  if (!timerBlock || !timerDisplay) return;
+
+  const isDisabled = localStorage.getItem("deca-timer-disabled") === "true";
+  if (isDisabled) {
+    timerBlock.classList.add("hidden");
+    return;
+  }
+
+  timerBlock.classList.remove("hidden"); // Ensure it's visible if enabled
+  timerDisplay.classList.remove("hidden"); // Ensure display is valid
+
   if (toggleTimerBtn) {
     toggleTimerBtn.textContent = state.timerHidden ? "Show" : "Hide";
   }
+
   if (state.timerHidden) {
-    timerDisplay.textContent = "--";
+    // If user clicked the text button to hide it temporarily
+    const base = state.timeRemainingMs ? "Time Hidden" : "Timer";
+    timerDisplay.textContent = `${base}`;
     return;
   }
   if (!state.sessionStart) {
@@ -535,6 +579,14 @@ function updateTimerDisplay() {
 
 function startSessionTimer(startedAt) {
   clearInterval(state.timerInterval);
+
+  // Check if disabled
+  const isDisabled = localStorage.getItem("deca-timer-disabled") === "true";
+  if (isDisabled) {
+    updateTimerDisplay();
+    return;
+  }
+
   if (!state.timeLimitMs || state.timeLimitMs <= 0) {
     state.timeLimitMs = DEFAULT_TIME_LIMIT_MINUTES * 60 * 1000;
     state.timeRemainingMs = state.timeLimitMs;
@@ -566,6 +618,9 @@ function stopSessionTimer() {
 }
 
 function toggleTimer() {
+  const isDisabled = localStorage.getItem("deca-timer-disabled") === "true";
+  if (isDisabled) return; // Do nothing if globally disabled
+
   state.timerHidden = !state.timerHidden;
   if (window.sfx) window.sfx.playClick();
   updateTimerDisplay();
@@ -772,19 +827,17 @@ function renderTestList() {
         .join("")}
           </select>
         </label>
-        <label>
-          <span class="muted small-label">Mins</span>
-          <div class="time-input-row">
-            <input
-              class="time-select"
-              data-test-id="${test.id}"
-              type="text"
-              inputmode="numeric"
-              value="${DEFAULT_TIME_LIMIT_MINUTES}"
-              spellcheck="false"
-              style="width: 50px; text-align: center;"
-            >
-          </div>
+        <label style="${localStorage.getItem("deca-timer-disabled") === "true" ? "display:none" : ""}">
+          <span class="muted small-label">Time Limit</span>
+          <select class="time-select" data-test-id="${test.id}">
+            <option value="0">None</option>
+            <option value="5">5m</option>
+            <option value="10">10m</option>
+            <option value="15">15m</option>
+            <option value="20">20m</option>
+            <option value="30">30m</option>
+            <option value="60">60m</option>
+          </select>
         </label>
         <button class="primary" data-test-id="${test.id}">
           <i class="ph ph-play"></i> Start
@@ -831,18 +884,23 @@ function renderTestList() {
 function deleteTest(testId, name) {
   if (!confirm(`Remove "${name}" from your list?`)) return;
 
-  // 1. Remove from state
+  // 1. Mark as hidden (persistently)
+  hiddenTestIds.add(testId);
+  persistHiddenTests();
+
+  // 2. Remove from state
   state.tests = state.tests.filter(t => t.id !== testId);
 
-  // 2. Remove from local storage
-  localTests.delete(testId);
-  persistLocalTests();
+  // 3. Remove from local storage if it's a local test (cleanup)
+  if (localTests.has(testId)) {
+    localTests.delete(testId);
+    persistLocalTests();
+  }
 
-  // 3. Re-render
+  // 4. Re-render
   renderTestList();
-
-  // 4. (Optional) If active, maybe warn? But for now just removing from list is enough.
 }
+
 
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
   if (!testId) return;
@@ -907,6 +965,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.currentIndex = 0;
     state.score = 0;
     state.answers = {};
+    state.currentSelection = null;
     state.selectedCount = data.selected_count || state.questions.length;
     state.totalAvailable = data.test?.total || testMeta.total || state.questions.length;
     state.showAllExplanations = false;
@@ -961,6 +1020,7 @@ function goToQuestion(idx) {
   recordCurrentQuestionTime();
   if (window.sfx) window.sfx.playHover();
   state.currentIndex = idx;
+  state.currentSelection = null; // Reset temp selection on nav
   renderQuestionCard();
 }
 
@@ -1110,7 +1170,7 @@ document.addEventListener("keydown", (e) => {
     const idx = parseInt(e.key) - 1;
     const question = state.questions[state.currentIndex];
     if (question && idx < question.options.length) {
-      handleAnswer(question, idx);
+      selectAnswer(idx);
     }
   }
   // Letters A-E maps to options 0-4
@@ -1119,7 +1179,7 @@ document.addEventListener("keydown", (e) => {
     const idx = code - 65;
     const question = state.questions[state.currentIndex];
     if (question && idx < question.options.length) {
-      handleAnswer(question, idx);
+      selectAnswer(idx);
     }
   }
 
@@ -1146,15 +1206,26 @@ function renderQuestionCard() {
   startQuestionTimer();
   const question = state.questions[state.currentIndex];
   const status = state.answers[question.id];
-  const disableOptions = state.sessionComplete || state.endedByTimer;
+  const disableOptions = state.sessionComplete || state.endedByTimer || (status && (status.correct !== undefined || status.revealed)); // Freeze if answered/revealed
   const controlsDisabled = state.sessionComplete || state.endedByTimer;
-  const feedbackText = status
-    ? status.correct
-      ? "Correct! Well done."
-      : status.correct === false
-        ? "Incorrect."
-        : "Answer revealed."
-    : "Pick an answer or press key (A, B, C, D).";
+
+  // Feedback Logic
+  let feedbackText = "Pick an answer.";
+  let feedbackClass = "";
+
+  if (status) {
+    if (status.correct === true) {
+      feedbackText = "Correct! Well done.";
+      feedbackClass = "correct";
+    } else if (status.correct === false) {
+      feedbackText = "Incorrect.";
+      feedbackClass = "incorrect";
+    } else if (status.revealed) {
+      feedbackText = "Answer revealed.";
+    }
+  } else if (state.currentSelection !== null) {
+    feedbackText = "Press 'Submit Answer' to check.";
+  }
 
   const isLast = state.currentIndex === state.questions.length - 1;
   const letters = ["A", "B", "C", "D", "E"];
@@ -1179,22 +1250,27 @@ function renderQuestionCard() {
       )
       .join("")}
     </div>
-    <div id="feedback" class="feedback ${status ? (status.correct ? "correct" : status.correct === false ? "incorrect" : "") : ""}">
+    <div id="feedback" class="feedback ${feedbackClass}" style="display: ${status || state.currentSelection !== null ? 'block' : 'none'}">
       ${feedbackText}
     </div>
-    <div id="explanation" class="explanation ${status && status.revealed ? "" : "hidden"}"></div>
+    <div id="explanation" class="explanation ${status && (status.revealed || status.correct !== undefined) ? "" : "hidden"}"></div>
     <div class="actions">
       <button id="prev-question" class="ghost" ${controlsDisabled ? "disabled" : ""}>
         <i class="ph ph-caret-left"></i> Previous
       </button>
-      <button id="next-question" class="primary" ${controlsDisabled ? "disabled" : ""}>
-        ${isLast ? '<i class="ph ph-check-circle"></i> Finish' : 'Next <i class="ph ph-caret-right" style="margin-left:6px; margin-right:0;"></i>'}
+      <button id="next-question" class="secondary" ${controlsDisabled ? "disabled" : ""}>
+        ${isLast ? 'Finish' : 'Next'} <i class="ph ph-caret-right" style="margin-left:6px; margin-right:0;"></i>
       </button>
-      <button id="show-answer" class="secondary" ${controlsDisabled ? "disabled" : ""}>
-        <i class="ph ph-eye"></i> Answer
-      </button>
-      <button id="submit-quiz" class="ghost" ${controlsDisabled ? "disabled" : ""}>
-        <i class="ph ph-flag"></i> Submit
+
+      ${!status
+      ? `<button id="submit-answer-btn" class="primary" ${state.currentSelection === null ? "disabled" : ""}>Submit Answer</button>`
+      : `<button id="show-answer" class="ghost" ${controlsDisabled ? "disabled" : ""}>
+              <i class="ph ph-eye"></i> Show Exp
+             </button>`
+    }
+      
+      <button id="submit-quiz-btn" class="ghost" ${controlsDisabled ? "disabled" : ""}>
+        <i class="ph ph-flag"></i> End Session
       </button>
     </div>
   `;
@@ -1208,39 +1284,57 @@ function renderQuestionCard() {
         return;
       }
       const choice = Number(btn.dataset.idx);
-      handleAnswer(question, choice);
+      selectAnswer(choice);
     });
   });
 
-  if (status) {
-    optionButtons.forEach((btn) => {
-      const idx = Number(btn.dataset.idx);
+  // Visual states for options
+  optionButtons.forEach((btn) => {
+    const idx = Number(btn.dataset.idx);
+
+    // If we have a final status
+    if (status) {
       if (status.choice === idx) {
         btn.classList.add(status.correct ? "correct" : "incorrect");
       }
       if (status.revealed && status.correctIndex === idx) {
         btn.classList.add("revealed", "correct");
       }
-    });
-    if (status.revealed) {
-      renderExplanation(question, status);
     }
+    // If we just have a temp selection
+    else if (state.currentSelection === idx) {
+      btn.classList.add("selected");
+    }
+
+    if (status && status.correctIndex === idx && (status.correct === false || status.revealed)) {
+      btn.classList.add("correct-highlight"); // Optional new class for "this was the right one"
+    }
+  });
+
+  if (status && (status.revealed || status.correct !== undefined)) {
+    renderExplanation(question, status);
+  }
+
+  // Bind Actions
+  const submitAnsBtn = document.getElementById("submit-answer-btn");
+  if (submitAnsBtn) {
+    submitAnsBtn.addEventListener("click", () => submitCurrentAnswer());
   }
 
   const showAnswerBtn = document.getElementById("show-answer");
-  showAnswerBtn.addEventListener("click", () => revealAnswer(question));
-  const submitBtn = document.getElementById("submit-quiz");
-  submitBtn.addEventListener("click", () => {
+  if (showAnswerBtn) showAnswerBtn.addEventListener("click", () => revealAnswer(question));
+
+  const endSessionBtn = document.getElementById("submit-quiz-btn");
+  if (endSessionBtn) endSessionBtn.addEventListener("click", () => {
     if (state.sessionComplete || state.endedByTimer) return;
     showSummary(false); // finish
     if (window.sfx) window.sfx.playClick();
   });
+
   const nextBtn = document.getElementById("next-question");
   nextBtn.addEventListener("click", nextQuestion);
-  nextBtn.disabled = controlsDisabled;
   const prevBtn = document.getElementById("prev-question");
   prevBtn.addEventListener("click", prevQuestion);
-  prevBtn.disabled = controlsDisabled;
 
   updateScore();
   updateProgress();
@@ -1248,16 +1342,42 @@ function renderQuestionCard() {
   persistSession();
 }
 
+function selectAnswer(choiceIndex) {
+  if (state.sessionComplete || state.endedByTimer) return;
+  // Don't allow changing if already corrected
+  const qId = state.questions[state.currentIndex].id;
+  if (state.answers[qId]) return;
+
+  if (window.sfx) window.sfx.playClick();
+  state.currentSelection = choiceIndex;
+  renderQuestionCard();
+}
+
+async function submitCurrentAnswer() {
+  if (state.currentSelection === null) return;
+  const question = state.questions[state.currentIndex];
+  const choiceIndex = state.currentSelection;
+  await handleAnswer(question, choiceIndex);
+}
+
+// Replaced handleAnswer to be the "Submit" action
 async function handleAnswer(question, choiceIndex) {
   if (state.sessionComplete || state.endedByTimer) return;
   recordCurrentQuestionTime();
   try {
     let isCorrect = false;
+    let details = {};
+
     if (state.isLocalActive) {
       const q = state.questions.find((item) => item.id === question.id);
       if (!q || typeof q.correct_index !== "number") throw new Error("Question data missing");
       isCorrect = choiceIndex === q.correct_index;
+      details = { correctIndex: q.correct_index, correctLetter: q.correct_letter, explanation: q.explanation };
     } else {
+      // For remote, we might need two calls or one 'submit' call that returns correction + explanation
+      // Existing API check returns { correct: boolean }
+      // We also want explanation immediately on submit now.
+
       const res = await fetch(
         `/api/tests/${encodeURIComponent(state.activeTest.id)}/check/${encodeURIComponent(question.id)}`,
         {
@@ -1270,9 +1390,28 @@ async function handleAnswer(question, choiceIndex) {
       if (!res.ok) throw new Error("Unable to submit answer");
       const data = await res.json();
       isCorrect = Boolean(data.correct);
+
+      // We also need the details to show explanation immediately
+      // Let's fetch explanation in parallel or after
+      const detailsRes = await fetch(
+        `/api/tests/${encodeURIComponent(state.activeTest.id)}/answer/${encodeURIComponent(question.id)}`,
+        { credentials: "same-origin" }
+      );
+      if (detailsRes.ok) {
+        details = await detailsRes.json();
+      }
     }
+
     const existing = state.answers[question.id] || {};
-    state.answers[question.id] = { ...existing, choice: choiceIndex, correct: isCorrect };
+    state.answers[question.id] = {
+      ...existing,
+      choice: choiceIndex,
+      correct: isCorrect,
+      ...details,
+      revealed: true // So renderExplanation works
+    };
+
+    state.currentSelection = null;
 
     if (window.sfx) {
       if (isCorrect) window.sfx.playCorrect();
@@ -1283,15 +1422,9 @@ async function handleAnswer(question, choiceIndex) {
     renderQuestionCard();
     persistSession();
   } catch (err) {
-    const feedbackEl = document.getElementById("feedback");
-    if (feedbackEl) {
-      feedbackEl.textContent = `Error: ${err.message}. Try again?`;
-      feedbackEl.className = "feedback incorrect";
-      feedbackEl.style.display = "block"; // Ensure visibility
-    }
-    // Don't restart timer immediately so user sees error
+    // ... error handling
     console.error("Submission failed:", err);
-    persistSession();
+    alert("Error submitting answer: " + err.message);
   }
 }
 
@@ -1518,8 +1651,22 @@ window.addEventListener("popstate", (event) => {
     overlay.classList.remove("hidden");
   } else {
     closeSettings({ fromPop: true });
+    closeCredits(); // Also close credits on back
   }
 });
+
+// --- Credits Logic ---
+function openCredits() {
+  const overlay = document.getElementById("credits-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("hidden");
+}
+
+function closeCredits() {
+  const overlay = document.getElementById("credits-overlay");
+  if (!overlay) return;
+  overlay.classList.add("hidden");
+}
 
 function initSettingsLogic() {
   const themeButtons = Array.from(document.querySelectorAll("[data-theme-option]"));
@@ -1542,6 +1689,16 @@ function initSettingsLogic() {
   // Toggles
   setupToggle("random-order-check", "deca-random-order", false);
   setupToggle("animations-toggle", "deca-animations-enabled", true);
+  setupToggle("disable-timer-toggle", "deca-timer-disabled", false, (val) => {
+    // Immediate effect if session active
+    if (state.timerInterval || state.sessionStart) {
+      if (val) stopSessionTimer(); // Killing the loop, but logic needs to handle resuming if unchecked? 
+      // Actually simpler: just reload or let next start handle it.
+      // Better: if active, just hide element? No, user wants it OFF.
+      // Let's just update the display visibility immediately.
+      updateTimerDisplay();
+    }
+  });
   setupToggle("perf-mode-toggle", "deca-perf-mode", true, (val) => {
     document.documentElement.classList.toggle("perf-mode", val);
   });
@@ -1586,6 +1743,7 @@ document.addEventListener("DOMContentLoaded", () => {
   } catch (e) { }
 
   hydrateLocalTests();
+  hydrateHiddenTests();
   // FILTER OUT UPLOADS AFTER HYDRATION to ensure they are gone.
   for (const key of localTests.keys()) {
     if (typeof key === 'string' && key.startsWith('u-')) {
