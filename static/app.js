@@ -192,6 +192,28 @@ function hydrateHiddenTests() {
   } catch (e) { }
 }
 
+function toggleStrike(e, idx, qId) {
+  if (e) e.stopPropagation();
+  if (state.sessionComplete || state.endedByTimer) return;
+
+  if (!state.strikes[qId]) {
+    state.strikes[qId] = new Set();
+  }
+
+  const currentSet = state.strikes[qId];
+  if (currentSet.has(idx)) {
+    currentSet.delete(idx);
+  } else {
+    currentSet.add(idx);
+  }
+
+  // Visual Update Only (don't re-render whole card if possible to keep it snappy?)
+  // Actually simplest is to re-render card or just toggle class on specific element
+  // But renderQuestionCard clears HTML, so we rely on re-rendering.
+  renderQuestionCard();
+}
+
+
 
 
 async function fetchTests() {

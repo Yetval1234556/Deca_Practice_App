@@ -2,9 +2,11 @@ import io
 import json
 import os
 import re
+import random
 import tempfile
 import uuid
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, List, Any, Optional, IO
 
@@ -24,7 +26,9 @@ MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
 MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
 DEFAULT_RANDOM_ORDER = os.getenv("DEFAULT_RANDOM_ORDER", "false").lower() in {"1", "true", "yes", "on"}
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
+MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+SESSION_CLEANUP_AGE_SECONDS = 86400  # 24 hours
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = SECRET_KEY
@@ -273,7 +277,7 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             "number": num,
             "question": q["prompt"],
             "options": [o["text"] for o in q["options"]],
-            "correct_index": correct_idx if correct_idx is not None else 0,
+            "correct_index": correct_idx if correct_idx is not None else -1,
             "correct_letter": ans_letter if ans_letter else "?",
             "explanation": explanation if explanation else "No explanation available (Parse failed)"
         })
@@ -329,6 +333,22 @@ def _save_session_data(sid: str, data: Dict[str, Any]):
     except Exception as e:
         print(f"Failed to save session: {e}")
 
+def _cleanup_old_sessions():
+    """Removes session files older than SESSION_CLEANUP_AGE_SECONDS."""
+    try:
+        now = time.time()
+        for p in SESSION_DATA_DIR.glob("*.json"):
+            if not p.is_file():
+                continue
+            age = now - p.stat().st_mtime
+            if age > SESSION_CLEANUP_AGE_SECONDS:
+                try:
+                    p.unlink()
+                except Exception as e:
+                    print(f"Failed to delete old session {p.name}: {e}")
+    except Exception as e:
+        print(f"Cleanup error: {e}")
+
 def _get_all_tests_for_session() -> Dict[str, Any]:
     all_tests = {}
     
@@ -357,6 +377,10 @@ _STATIC_TESTS_CACHE = {}
 
 @app.route("/")
 def home():
+    # Opportunistic cleanup
+    if random.random() < 0.1:  # Run 10% of the time on home load
+        _cleanup_old_sessions()
+        
     sid = _get_session_id()
     data = _load_session_data(sid)
     if data.get("uploads"):
