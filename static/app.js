@@ -1556,7 +1556,7 @@ async function showSummary(forceShowExplanations) {
       const timeTaken = state.perQuestionMs[q.id] || 0;
       const explanationHtml =
         showExplanation && status.explanation !== undefined
-          ? `<div class="explanation"><strong>Correct (${status.correctLetter || "?"}):</strong> ${escapeHtml(
+          ? `<div class="explanation"><strong>Correct (${status.correct_letter || status.correctLetter || "?"}):</strong> ${escapeHtml(
             tidyText(status.explanation || "No explanation provided.")
           )}<br><span class="muted">Time: ${formatMs(timeTaken)}</span></div>`
           : `<div class="explanation muted">Time: ${formatMs(timeTaken)}</div>`;
@@ -1582,7 +1582,7 @@ function renderExplanation(question, status) {
   const el = document.getElementById("explanation");
   if (!el || !status.explanation) return;
   el.innerHTML = `
-    <strong>Correct Answer: ${status.correctLetter}</strong><br>
+    <strong>Correct Answer: ${status.correct_letter || status.correctLetter}</strong><br>
     ${escapeHtml(tidyText(status.explanation))}
   `;
   el.classList.remove("hidden");
