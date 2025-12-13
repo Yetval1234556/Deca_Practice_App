@@ -749,6 +749,34 @@ select:focus {
   border-style: dashed;
 }
 
+.strike-toggle {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  cursor: pointer;
+  opacity: 0.3;
+  transition: all 0.2s;
+  z-index: 5;
+}
+
+.strike-toggle:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-main);
+}
+
+/* Ensure click on toggle doesn't look like button active state */
+.strike-toggle:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
 .option-btn.selected {
   border-color: var(--primary);
   background: var(--primary-glow);

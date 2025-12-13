@@ -89,9 +89,7 @@ if (!window.sfx) {
 let performanceChartInstance = null; // Chart.js instance
 let settingsOpenedFromHash = false;
 
-/**
- * --- UTILITIES ---
- */
+
 
 function escapeHtml(str) {
   return str.replace(/[&<>"']/g, (tag) => {
@@ -194,9 +192,7 @@ function hydrateHiddenTests() {
   } catch (e) { }
 }
 
-/**
- * --- TEST LOADING & UPLOAD ---
- */
+
 
 async function fetchTests() {
   if (testListEl) {
@@ -339,9 +335,7 @@ async function handleUpload() {
   }
 }
 
-/** 
- * --- HISTORY & ANALYTICS ---
- */
+
 
 function saveSessionToHistory() {
   if (!state.activeTest || !state.questions.length) return;
@@ -437,9 +431,7 @@ function renderPerformanceChart() {
   });
 }
 
-/**
- * --- SESSION STATE MANAGEMENT ---
- */
+
 
 function persistSession() {
   if (typeof localStorage === "undefined") return;
@@ -462,6 +454,7 @@ function resetState() {
   state.activeTest = null;
   state.questions = [];
   state.answers = {};
+  state.strikes = {};
   state.currentSelection = null;
   state.currentIndex = 0;
   state.score = 0;
@@ -529,9 +522,7 @@ function updateSessionMeta() {
   `;
 }
 
-/**
- * --- TIMER SUBSYSTEM ---
- */
+
 
 function updateTimerDisplay() {
   const timerBlock = document.querySelector(".timer-block");
@@ -696,9 +687,7 @@ async function persistResults() {
   }
 }
 
-/**
- * --- SYSTEM LIFECYCLE ---
- */
+
 
 async function ensureAnswerDetails(question) {
   const existing = state.answers[question.id] || {};
@@ -782,9 +771,7 @@ function restoreSessionFromStorage() {
   return true;
 }
 
-/**
- * --- DATA FETCHING & UI RENDERING ---
- */
+
 
 function normalizeTimeLimitInput(value) {
   const raw = (value || "").toString().trim();
@@ -965,6 +952,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
     state.currentIndex = 0;
     state.score = 0;
     state.answers = {};
+    state.strikes = {};
     state.currentSelection = null;
     state.selectedCount = data.selected_count || state.questions.length;
     state.totalAvailable = data.test?.total || testMeta.total || state.questions.length;
@@ -1157,9 +1145,7 @@ function toggleQuestionGrid() {
   persistSession();
 }
 
-/**
- * --- KEYBOARD SHORTCUTS ---
- */
+
 document.addEventListener("keydown", (e) => {
   // Only enable if test is active and not finished
   if (summaryArea && !summaryArea.classList.contains("hidden")) return;
@@ -1242,11 +1228,19 @@ function renderQuestionCard() {
     <div class="options">
       ${question.options
       .map(
-        (option, idx) =>
-          `<button class="option-btn" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
+        (option, idx) => {
+          const isStruck = state.strikes[question.id] && state.strikes[question.id].has(idx);
+          // If struck, we might want to prevent selection? Or just visual?
+          // The user usually wants visual elimination. We can still allow selecting it if they really want.
+
+          return `<button class="option-btn ${isStruck ? "striked" : ""}" data-idx="${idx}" ${disableOptions ? "disabled" : ""}>
               <span class="kbd-hint">${letters[idx] || (idx + 1)}</span>
               <strong>${String.fromCharCode(65 + idx)}.</strong> ${escapeHtml(tidyText(option))}
-            </button>`
+              <div class="strike-toggle" onclick="toggleStrike(event, ${idx}, '${question.id}')" title="Strike out answer">
+                 <i class="ph ph-eye-slash"></i>
+              </div>
+            </button>`;
+        }
       )
       .join("")}
     </div>
@@ -1588,11 +1582,10 @@ function renderExplanation(question, status) {
   el.classList.remove("hidden");
 }
 
-// --- Audio Player Logic ---
-// Audio is handled by bg-music.js
 
 
-// --- Settings Virtual Page Logic ---
+
+
 function openSettings(fromHash = false) {
   const overlay = document.getElementById("settings-overlay");
   if (!overlay) return;
@@ -1655,7 +1648,7 @@ window.addEventListener("popstate", (event) => {
   }
 });
 
-// --- Credits Logic ---
+
 function openCredits() {
   const overlay = document.getElementById("credits-overlay");
   if (!overlay) return;
