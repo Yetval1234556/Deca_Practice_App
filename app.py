@@ -335,6 +335,11 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         num = q["number"]
         if num in seen_ids: continue
         
+        # Sort options by label to handle multi-column reading order (A, C, B, D -> A, B, C, D)
+        # We only sort if labels look standard (single letters)
+        # But our regex enforces single letters [A-E].
+        q["options"].sort(key=lambda x: x["label"])
+        
         ans_data = answers.get(num)
         ans_letter = ans_data["letter"] if ans_data else None
         explanation = ans_data["explanation"] if ans_data else ""
