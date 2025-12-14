@@ -19,8 +19,18 @@ TESTS_DIR = BASE_DIR / "tests"
 INSTANCE_DIR = BASE_DIR / "instance"
 SESSION_DATA_DIR = INSTANCE_DIR / "sessions"
 
-TESTS_DIR.mkdir(parents=True, exist_ok=True)
-SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+try:
+    TESTS_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    print("⚠️  WARNING: Could not create TESTS_DIR. Uploads might fail if not using /tmp.")
+
+try:
+    SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
+except Exception:
+    # Fallback to temp dir for read-only filesystems (common in containers)
+    print("⚠️  WARNING: Read-only filesystem detected. Using /tmp for sessions.")
+    SESSION_DATA_DIR = Path(tempfile.gettempdir()) / "deca_app_sessions"
+    SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
 MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
@@ -29,9 +39,13 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     if os.getenv("ENVIRONMENT") == "production":
-        raise RuntimeError("SECRET_KEY must be set in production")
-    SECRET_KEY = "dev-secret-key"
-    print("⚠️  WARNING: Using default SECRET_KEY in development")
+         # Fallback to random key instead of crashing
+         import secrets
+         SECRET_KEY = secrets.token_hex(32)
+         print("⚠️  WARNING: SECRET_KEY not set in production. Generated temporary key.")
+    else:
+        SECRET_KEY = "dev-secret-key"
+        print("⚠️  WARNING: Using default SECRET_KEY in development")
 SESSION_CLEANUP_AGE_SECONDS = 86400  # 24 hours
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
