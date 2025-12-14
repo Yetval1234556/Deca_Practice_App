@@ -300,8 +300,9 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
         return {
             "id": test_id,
             "name": name_hint,
-            "description": f"Parsed {len(questions)} questions.",
-            "questions": questions
+            "description": "",
+            "questions": questions,
+            "question_count": len(questions)
         }
     except Exception as e:
         print(f"Parsing error: {e}")
@@ -382,10 +383,8 @@ def home():
         _cleanup_old_sessions()
         
     sid = _get_session_id()
-    data = _load_session_data(sid)
-    if data.get("uploads"):
-        data["uploads"] = {}
-        _save_session_data(sid, data)
+    # Ensure session exists
+    _load_session_data(sid)
     return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
 @app.route("/settings")
@@ -482,7 +481,8 @@ def upload_pdf():
         q["id"] = f"{uid}-q{q['number']}"
     
     data = _load_session_data(sid)
-    data["uploads"] = {}
+    if "uploads" not in data:
+        data["uploads"] = {}
     data["uploads"][uid] = parsed
     _save_session_data(sid, data)
     
