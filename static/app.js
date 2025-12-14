@@ -32,6 +32,7 @@ const state = {
   questionGridCollapsed: true,
   randomOrderEnabled: false,
   isLocalActive: false,
+  strikes: {},
 };
 
 const RANDOM_KEY = "deca-random-order";
@@ -178,7 +179,7 @@ function persistHiddenTests() {
   if (typeof localStorage === "undefined") return;
   try {
     localStorage.setItem(HIDDEN_TESTS_KEY, JSON.stringify(Array.from(hiddenTestIds)));
-  } catch (e) { }
+  } catch (e) { console.warn('Failed to persist hidden tests', e); }
 }
 
 function hydrateHiddenTests() {
@@ -189,7 +190,7 @@ function hydrateHiddenTests() {
       const arr = JSON.parse(raw);
       arr.forEach(id => hiddenTestIds.add(id));
     }
-  } catch (e) { }
+  } catch (e) { console.warn('Failed to hydrate hidden tests', e); }
 }
 
 function toggleStrike(e, idx, qId) {
@@ -334,15 +335,19 @@ async function handleUpload() {
         localTests.set(data.id, enriched);
         persistLocalTests();
         setUploadStatus(`Uploaded and cached "${data.name}". Ready to start.`);
+        // Auto-clear success message after 8 seconds
+        setTimeout(() => setUploadStatus(""), 8000);
       } else {
         localTests.delete(data.id);
         persistLocalTests();
         setUploadStatus(`Uploaded "${data.name}".`, false);
+        setTimeout(() => setUploadStatus(""), 8000);
       }
     } catch (cacheErr) {
       localTests.delete(data.id);
       persistLocalTests();
       setUploadStatus(`Uploaded "${data.name}".`, false);
+      setTimeout(() => setUploadStatus(""), 8000);
     }
 
     // Valid update, no need to refresh from server again (which causes flicker)
@@ -385,10 +390,8 @@ function renderPerformanceChart() {
   if (!chartCanvas || !summaryChart) return;
 
   // Destroy old instance if exists
-  if (performanceChartInstance) {
-    performanceChartInstance.destroy();
-    performanceChartInstance = null;
-  }
+  performanceChartInstance?.destroy();
+  performanceChartInstance = null;
 
   // Load history
   let history = [];
@@ -648,6 +651,7 @@ function tickSessionTimer() {
   if (state.timeLimitMs) {
     state.timeRemainingMs = Math.max(state.timeLimitMs - elapsed, 0);
     if (state.timeRemainingMs <= 0 && !state.endedByTimer) {
+      state.endedByTimer = true;
       handleTimeExpiry().catch((err) => console.error(err));
       return;
     }
@@ -659,6 +663,16 @@ async function handleTimeExpiry() {
   if (state.sessionComplete) return;
   state.endedByTimer = true;
   recordCurrentQuestionTime();
+
+  // Save current selection before time expires to prevent data loss
+  if (state.currentSelection !== null && state.questions[state.currentIndex]) {
+    const currentQ = state.questions[state.currentIndex];
+    if (!state.answers[currentQ.id] || state.answers[currentQ.id].choice === undefined) {
+      // Auto-submit the current selection using the correct function
+      await handleAnswer(currentQ, state.currentSelection);
+    }
+  }
+
   state.timeRemainingMs = 0;
   updateTimerDisplay();
   await showSummary(state.showAllExplanations);
@@ -1161,6 +1175,12 @@ document.addEventListener("keydown", (e) => {
   // Only enable if test is active and not finished
   if (summaryArea && !summaryArea.classList.contains("hidden")) return;
   if (!state.activeTest || state.sessionComplete || state.endedByTimer) return;
+
+  // Ignore shortcuts if user is typing in an input field
+  const target = e.target;
+  if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT')) {
+    return;
+  }
 
   // Numbers 1-5 maps to options 0-4
   if (e.key >= '1' && e.key <= '5') {

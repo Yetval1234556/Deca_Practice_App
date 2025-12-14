@@ -207,11 +207,7 @@ h1 {
   background-clip: text;
   -webkit-text-fill-color: transparent;
   display: inline-block;
-  background: linear-gradient(to right, var(--text-main), var(--primary));
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  display: inline-block;
+
 }
 
 /* Performance Mode Overrides */

@@ -26,8 +26,12 @@ MAX_QUESTIONS_PER_RUN = int(os.getenv("MAX_QUESTIONS_PER_RUN", "100"))
 MAX_TIME_LIMIT_MINUTES = int(os.getenv("MAX_TIME_LIMIT_MINUTES", "180"))
 DEFAULT_RANDOM_ORDER = os.getenv("DEFAULT_RANDOM_ORDER", "false").lower() in {"1", "true", "yes", "on"}
 MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
-MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
-SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key")
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    if os.getenv("ENVIRONMENT") == "production":
+        raise RuntimeError("SECRET_KEY must be set in production")
+    SECRET_KEY = "dev-secret-key"
+    print("⚠️  WARNING: Using default SECRET_KEY in development")
 SESSION_CLEANUP_AGE_SECONDS = 86400  # 24 hours
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
@@ -305,7 +309,9 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
             "question_count": len(questions)
         }
     except Exception as e:
-        print(f"Parsing error: {e}")
+        # Enhanced error logging for better debugging
+        app.logger.error(f"PDF parsing error for '{name_hint}': {e}", exc_info=True)
+        print(f"⚠️  Parsing error for '{name_hint}': {e}")
         return {}
 
 def _get_session_id() -> str:
@@ -378,8 +384,8 @@ _STATIC_TESTS_CACHE = {}
 
 @app.route("/")
 def home():
-    # Opportunistic cleanup
-    if random.random() < 0.1:  # Run 10% of the time on home load
+    # Opportunistic cleanup - reduced frequency to improve performance
+    if random.random() < 0.05:  # Run 5% of the time on home load
         _cleanup_old_sessions()
         
     sid = _get_session_id()
@@ -448,6 +454,8 @@ def start_quiz(test_id):
         
     try:
         limit = int(payload.get("time_limit_seconds", 0))
+        if limit > MAX_TIME_LIMIT_MINUTES * 60:
+            limit = MAX_TIME_LIMIT_MINUTES * 60
     except:
         limit = 0
         
