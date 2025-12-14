@@ -119,10 +119,12 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 
                 line = re.sub(r"\s{2,}", " ", line)
 
-                # Fix for ICDC footer merging into last question
-                cutoff_marker = "AAM - Apparel and Accessories Marketing Series Event"
-                if cutoff_marker in line:
-                    line = line.split(cutoff_marker)[0].strip()
+                # Fix for ICDC footer merging into last question (Generic Event Code)
+                # Matches " ASM - Automotive", " BSM - Business", etc.
+                footer_regex = re.compile(r"\s+\b([A-Z]{3,4}\s+-\s+[A-Z])")
+                footer_match = footer_regex.search(line)
+                if footer_match:
+                     line = line[:footer_match.start()].strip()
                 
                 # Additional cleanups for ICDC footer remnants
                 if "specialist levels." in line:
