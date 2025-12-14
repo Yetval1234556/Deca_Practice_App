@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="light">
+<html lang="en" data-theme="ocean">
 
 <head>
   <meta charset="UTF-8">
@@ -16,8 +16,11 @@
       } catch (e) { }
 
       const saved = localStorage.getItem("deca-theme");
-      if (saved === "dark" || saved === "light") {
+      // Allow any saved theme, default to ocean if missing
+      if (saved) {
         document.documentElement.setAttribute("data-theme", saved);
+      } else {
+        document.documentElement.setAttribute("data-theme", "ocean");
       }
     })();
   </script>
