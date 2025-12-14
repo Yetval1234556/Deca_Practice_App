@@ -140,6 +140,8 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     line = line.split("career -sustaining")[0].strip()
                 if line.endswith("Business Management and"):
                     line = line[:-23].strip() 
+                if "sustaining, specialist, supervi" in line:
+                    line = line.split("sustaining, specialist, supervi")[0].strip()
                 
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
