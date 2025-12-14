@@ -199,8 +199,12 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
 
         q_match = q_start_re.match(line)
         if q_match:
-            finalize_current()
             num = int(q_match.group(1))
+            if not (1 <= num <= 100):
+                # Ignore questions out of range (e.g. 360)
+                continue
+                
+            finalize_current()
             text = q_match.group(2)
             current_q = {
                 "number": num,
