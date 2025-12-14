@@ -44,6 +44,15 @@ app.config.update(
 def _normalize_whitespace(text: str) -> str:
     if not isinstance(text, str):
         return ""
+    # Fix merged words like "theEnd" -> "the End"
+    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
+    
+    # Fix split words: single consonant followed by another letter (e.g. "t e s t" -> "test")
+    # We repeat this to handle multiple splits in a row
+    for _ in range(3):
+         # Merge singleton consonant (not 'a' or 'i') with following letter
+         text = re.sub(r"\b([b-hj-zB-HJ-Z])\s+([a-zA-Z])", r"\1\2", text)
+         
     text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -193,15 +202,20 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             questions.append(current_q)
         current_q = None
 
-    for line in lines:
-        if re.search(r"answer\s*(key|section)", line, re.IGNORECASE):
-            break
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        i += 1
+        
+        # Check answer key start
+        if line.lower().strip() == "answer key":
+             break
 
+        # Check for Question start
         q_match = q_start_re.match(line)
         if q_match:
             num = int(q_match.group(1))
             if not (1 <= num <= 100):
-                # Ignore questions out of range (e.g. 360)
                 continue
                 
             finalize_current()
@@ -213,17 +227,20 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             }
             continue
 
-        if not current_q:
-            continue
-
-        if re.match(r"^\d{1,3}\.\s*[A-E]\s*$", line):
-            # Likely an Answer Key line like "85. C". Ignore it.
-            continue
-            
+        # Check for Option start
         opt_match = opt_start_re.match(line)
         if opt_match:
             label = opt_match.group(1).upper()
             text = opt_match.group(2)
+            
+            # Handle orphan label "A." with text on next line
+            if not text.strip() and i < len(lines):
+                 # Peek next line
+                 next_line = lines[i]
+                 # Ensure next line isn't another option or question
+                 if not opt_start_re.match(next_line) and not q_start_re.match(next_line):
+                      text = next_line
+                      i += 1
             
             # Detect implicit new question (e.g. merged Q84/Q85)
             # If we see "A" and we already have options (specifically an A), split.
@@ -243,9 +260,11 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
 
             current_q["options"].append({"label": label, "text": text})
             
+            # Check for inline options (e.g. "A. Apple B. Banana")
             split_iter = list(inline_opt_re.finditer(text))
             if split_iter:
                 full_text = text
+                # Normalize splitting
                 parts = re.split(inline_opt_re, full_text)
                 current_q["options"][-1]["text"] = parts[0]
                 
@@ -257,19 +276,20 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                     idx += 2
             continue
 
-        if current_q["options"]:
-            if re.match(r"^\d{1,3}\.", line):
-                finalize_current()
-                q_match_retry = q_start_re.match(line)
-                if q_match_retry:
-                     num = int(q_match_retry.group(1))
-                     text = q_match_retry.group(2)
-                     current_q = {"number": num, "prompt": text, "options": []}
-                continue
-
-            current_q["options"][-1]["text"] += " " + line
-        else:
-            current_q["prompt"] += " " + line
+        if current_q:
+            if current_q["options"]:
+                if re.match(r"^\d{1,3}\.", line):
+                    finalize_current()
+                    q_match_retry = q_start_re.match(line)
+                    if q_match_retry:
+                         num = int(q_match_retry.group(1))
+                         text = q_match_retry.group(2)
+                         current_q = {"number": num, "prompt": text, "options": []}
+                    continue
+    
+                current_q["options"][-1]["text"] += " " + line
+            else:
+                current_q["prompt"] += " " + line
 
     finalize_current()
     
