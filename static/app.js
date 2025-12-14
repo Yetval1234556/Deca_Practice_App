@@ -291,20 +291,16 @@ async function handleUpload() {
     setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions). Caching...`);
     uploadInput.value = "";
 
-    // Enforce single upload: Clear previous uploads from local cache
     // We assume test IDs starting with 'u-' are uploads.
-    for (const key of localTests.keys()) {
-      if (typeof key === 'string' && key.startsWith('u-')) {
-        localTests.delete(key);
-      }
-    }
+    // (Optimization: Do not clear old uploads, allow multiple)
+    // for (const key of localTests.keys()) { ... }
     persistLocalTests();
 
     // Replace list with the newest upload first (only one test active per session)
     // Merge with local uploads
     const locals = localTestSummaries();
     // Unique by ID, local overrides server if collision (unlikely with u- prefix)
-    const combined = [data, ...locals.filter(lt => lt.id !== data.id && !lt.id.startsWith('u-'))];
+    const combined = [data, ...locals.filter(lt => lt.id !== data.id)];
 
     // Filter hidden
     state.tests = combined.filter(t => !hiddenTestIds.has(t.id));
@@ -349,7 +345,8 @@ async function handleUpload() {
       setUploadStatus(`Uploaded "${data.name}".`, false);
     }
 
-    await refreshTestsWithRetry(2, 350);
+    // Valid update, no need to refresh from server again (which causes flicker)
+    // await refreshTestsWithRetry(2, 350);
   } catch (err) {
     setUploadStatus(err.message || "Upload failed.", true);
   } finally {
