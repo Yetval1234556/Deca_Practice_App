@@ -212,10 +212,31 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         if not current_q:
             continue
 
+        if re.match(r"^\d{1,3}\.\s*[A-E]\s*$", line):
+            # Likely an Answer Key line like "85. C". Ignore it.
+            continue
+            
         opt_match = opt_start_re.match(line)
         if opt_match:
             label = opt_match.group(1).upper()
             text = opt_match.group(2)
+            
+            # Detect implicit new question (e.g. merged Q84/Q85)
+            # If we see "A" and we already have options (specifically an A), split.
+            if current_q and label == "A" and any(o["label"] == "A" for o in current_q["options"]):
+                prev_num = current_q["number"]
+                finalize_current()
+                # Create implied question
+                current_q = {
+                    "number": prev_num + 1,
+                    "prompt": "[Prompt text missing from PDF]",
+                    "options": []
+                }
+            
+            if not current_q:
+                # Orbiting option with no question? Skip or create dummy
+                continue
+
             current_q["options"].append({"label": label, "text": text})
             
             split_iter = list(inline_opt_re.finditer(text))
@@ -248,6 +269,8 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
 
     finalize_current()
     
+    finalize_current()
+    
     final_questions = []
     seen_ids = set()
     
@@ -255,7 +278,40 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         num = q["number"]
         if num in seen_ids: continue
         
+        # Sort options by label to detect gaps
         q["options"].sort(key=lambda x: x["label"])
+        
+        # Fill missing options (e.g. if C is missing in A,B,D)
+        labels = [o["label"] for o in q["options"]]
+        if labels:
+            # We expect A, B, C, D...
+            expected_labels = ['A','B','C','D','E']
+            # Determine range
+            max_idx = -1
+            for l in labels:
+                if l in expected_labels:
+                    max_idx = max(max_idx, expected_labels.index(l))
+            
+            # If we have D (index 3), we need A,B,C.
+            # If we only have A (index 0), max_idx=0.
+            # We want at least 4 options if possible, or up to max_label
+            target_count = max(4, max_idx + 1)
+            
+            new_options = []
+            current_src_idx = 0
+            for i in range(target_count):
+                exp_label = expected_labels[i]
+                if current_src_idx < len(q["options"]) and q["options"][current_src_idx]["label"] == exp_label:
+                    new_options.append(q["options"][current_src_idx])
+                    current_src_idx += 1
+                else:
+                    # Missing
+                    new_options.append({"label": exp_label, "text": "[Option missing from PDF]"})
+            
+            q["options"] = new_options
+        else:
+            # No options? Add placeholders
+            q["options"] = [{"label": l, "text": "[Option missing]"} for l in "ABCD"]
         
         ans_data = answers.get(num)
         ans_letter = ans_data["letter"] if ans_data else None
