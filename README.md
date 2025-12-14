@@ -1,67 +1,65 @@
-# DECA Practice Lab
+# DECA Practice Lab 🚀
 
-Built for DECA practice. Drop any DECA exam PDF into `tests/` and get an instant, fully local drill UI: questions stay in order, answers and explanations stay hidden until you ask. No manual entry, no cloud calls, just your DECA tests plus fast feedback.
+> **The minimal, distraction-free way to ace your DECA exams.**
 
-## Highlights
+Welcome to the **DECA Practice Lab**! This tool is designed to help you prepare for your competitions by turning static PDF exams into interactive, scored practice sessions. No manual data entry, no accounts, just pure focus.
 
-Highlights include a DECA-ready parser (1–100 numbered questions with A–E options, dense answer keys tolerated), instant scoring with timed mode, jump-anywhere navigation, light and dark themes with remembered preference, full summaries with explanations, missed-only review, and an all-local flow where answers are only fetched when you ask for them.
+## ✨ Features
 
-## Quick start
+- **🏆 Instant Practice**: Drag and drop *any* official DECA exam PDF into the `tests/` folder (or upload via the UI) and start practicing immediately.
+- **🎨 Beautiful Themes**: Customize your study space with themes like **Ocean**, **Midnight**, **Sunset**, **Lavender**, and **Terminal**.
+- **⚡ Interactive Quizzes**:
+    - **Hide Answers**: Pick your answer first, then "Submit" to see if you're right.
+    - **Strikeout**: Click the "eye" icon 👁️ to cross out wrong answers.
+    - **Explanations**: Learn *why* an answer is right with detailed breakdowns.
+- **⏱️ Timed Mode**: Simulate real exam conditions with a countdown timer, or disable it for stress-free study.
+- **📊 Smart Review**: The app tracks your missed questions so you can focus specifically on your weak spots.
 
-Install dependencies with Python 3.9+:
-```bash
-python3 -m pip install -r requirements.txt
-```
-Run the server:
-```bash
-python3 app.py
-```
-Open http://localhost:8080 and pick a test; answers stay server-side until you click Show correct answer.
+---
 
-## Adding DECA PDFs
+## 🚀 How to Use
 
-Place PDF files inside `tests/` (for example `tests/marketing_exam.pdf`). Each PDF should have numbered questions (1–100) with multiple-choice options labeled A–D/E and an answer section near the end mapping numbers to answers with optional explanations directly under each answer. The parser is tolerant of spacing and punctuation such as `1. A`, `1)A`, or `1 - A`. Click Reload in the UI or refresh the page to pick up new PDFs; no server restart is required.
+1.  **Open the App**: Launch the application (see below).
+2.  **Pick a Test**: content is automatically loaded from your `tests` folder.
+3.  **Start Practicing**:
+    *   **Select**: Click an option (A, B, C, D) to mark your choice (blue).
+    *   **Submit**: Click **Submit Answer** to lock it in and see the result (Green = Correct, Red = Incorrect).
+    *   **Eliminate**: Click the small eye icon to visually strike out options you know are wrong.
+4.  **Review**: At the end of the test (or anytime), check the **Results** dashboard to see your score and review questions you missed.
 
-## How it works
+---
 
-The backend reads every PDF in `tests/`, extracts lines, finds the answer section, parses the answer key with regex, and pairs it to numbered questions, options, answers, and explanations. Dense answer lines such as `97.B 98.C 99.D` are split and explanations are captured until the next answer entry. Questions without matching answers or options are skipped; only items numbered 1–100 are kept and sorted. Core routes: `/api/tests` to list tests, `/api/tests/<id>/start_quiz` to begin a session (accepts `count`, `mode` of `regular` or `review_incorrect`, and optional `time_limit_seconds`), `/api/tests/<id>/check/<qid>` for correctness, and `/api/tests/<id>/answer/<qid>` for the correct option and explanation.
+## 🛠️ Technical & Installation Data
 
-## Frontend features
+### Quick Start (Local)
+1.  **Install Python** (3.9 or newer).
+2.  **Install Dependencies**:
+    ```bash
+    pip install -r requirements.txt
+    ```
+3.  **Run the App**:
+    ```bash
+    python app.py
+    ```
+4.  **Open Browser**: Go to `http://localhost:8080`.
 
-The UI offers a test selection sidebar with a question-count picker, one-question-at-a-time flow with immediate feedback, timed practice with auto-submit when time expires, a timer that can be hidden without pausing, a dedicated Show correct answer control, a results summary with explanations, a review-incorrect-only mode, and the ability to restart or switch tests without restarting the server.
+### Adding New Tests
+Simply place your PDF files in the `tests/` directory. The app automatically detects them.
+*   **Format**: Standard DECA exams (Questions 1-100, Options A-D).
+*   **Parsing**: The app is smart enough to handle various text layouts, but standard formatting works best.
 
-## Deploying and serving
+### Deployment (Docker / Cloud)
+*   **Docker**:
+    ```bash
+    docker build -t deca-practice .
+    docker run -p 8080:8080 deca-practice
+    ```
+*   **Environment Variables**:
+    *   `SECRET_KEY`: Auto-generated if missing (safe for production).
+    *   `PORT`: Defaults to 8080.
 
-Local usage: run `python3 app.py` (honors `HOST` and `PORT`, default 0.0.0.0:8080). Production-style usage: run `gunicorn app:app` and bind as needed. Health check: `GET /health` returns `{"status":"ok"}`. Environment toggles include `DEFAULT_RANDOM_ORDER` (true/false), `MAX_QUESTIONS_PER_RUN` (int, default 100), and `MAX_TIME_LIMIT_MINUTES` (int, default 180).
-
-## Docker
-
-Build the image:
-```bash
-docker build -t deca-practice .
-```
-Run it (maps port 8080):
-```bash
-docker run --rm -p 8080:8080 deca-practice
-```
-Mount your PDFs without rebuilding by adding `-v "$(pwd)/tests:/app/tests"`.
-
-## Tests
-
-Install test dependencies and run pytest:
-```bash
-python3 -m pip install -r requirements-dev.txt
-pytest
-```
-
-## Tips for reliable parsing
-
-Keep question numbers at the start of a line (for example `12) Question text` or `12. Question text`). Label options with leading letters (`A)`, `B.`, `C -`). Ensure the answer key uses clear number-to-letter pairs; any spacing or punctuation is fine (`1 A`, `1. A`, `1-A`). Explanations placed directly after the answer line are captured until the next answer entry. If a PDF cannot be parsed, check server logs for Skipping messages that describe why a file or question was skipped.
-
-## Key backend functions (app.py)
-
-`_lines_from_pdf(path)` extracts trimmed lines and normalizes spacing. `_find_answer_section_start(lines)` locates the likely start of the answer key. `_explode_answer_lines(lines)` splits dense keys. `_parse_answer_key(lines, start, raw_text)` builds the answer and explanation map within 1–100 bounds. `_parse_questions(lines, stop=None)` and `_parse_question_blocks(text)` recover numbered questions and options. `_attach_answers(test_id, questions, answers)` pairs questions to answers. `_parse_pdf_to_test(path)` orchestrates parsing into a test payload. `load_all_tests()` caches parsed tests and reloads on file changes.
-
-## Credits
-
-Icons: Phosphor Icons CDN. Fonts: Space Grotesk from Google Fonts. Charts: Chart.js. Confetti: canvas-confetti.
+### Credits
+Built with ❤️ for DECA students.
+*   **Icons**: Phosphor Icons
+*   **Fonts**: Space Grotesk & Inter
+*   **Charts**: Chart.js
