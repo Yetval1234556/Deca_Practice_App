@@ -89,6 +89,7 @@ def _looks_like_header_line(text: str) -> bool:
         r"(?i)^page\s+\d+",
         r"^\d+\s*(of|/)\s*\d+$",
         r"(?i)copyright",
+        r"^[A-Z]{3,4}\s+-\s+[A-Z]", # Event codes (ASM - Automotive...)
     ]
     if any(re.search(p, text) for p in patterns):
         return True
@@ -117,6 +118,17 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     continue
                 
                 line = re.sub(r"\s{2,}", " ", line)
+
+                # Fix for ICDC footer merging into last question
+                cutoff_marker = "AAM - Apparel and Accessories Marketing Series Event"
+                if cutoff_marker in line:
+                    line = line.split(cutoff_marker)[0].strip()
+                
+                # Additional cleanups for ICDC footer remnants
+                if "specialist levels." in line:
+                    line = line.replace("specialist levels.", "").strip()
+                if "Center®, Columbus, Ohio" in line:
+                     line = line.split("Center®, Columbus, Ohio")[0].strip()
                 
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
@@ -255,8 +267,17 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                 }
             
             if not current_q:
-                # Orbiting option with no question? Skip or create dummy
-                continue
+                # Special case: Q1 prompt missing (e.g. ENTRE_T_B25.pdf)
+                # If we see "A" and have parsed 0 questions so far, assume this is Q1.
+                if label == "A" and not questions:
+                    current_q = {
+                        "number": 1,
+                        "prompt": "[Question prompt missing from PDF text]",
+                        "options": []
+                    }
+                else:
+                    # Orbiting option with no question and not Q1? Skip.
+                    continue
 
             current_q["options"].append({"label": label, "text": text})
             
