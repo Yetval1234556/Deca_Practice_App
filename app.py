@@ -120,17 +120,26 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 line = re.sub(r"\s{2,}", " ", line)
 
                 # Fix for ICDC footer merging into last question (Generic Event Code)
-                # Matches " ASM - Automotive", " BSM - Business", etc.
-                footer_regex = re.compile(r"\s+\b([A-Z]{3,4}\s+-\s+[A-Z])")
+                # Matches " ASM - Automotive", " BSM - Business", " BLTDM – Business"
+                # Handle 3-5 letters (e.g. BLTDM) and various dashes (- – —)
+                # Allow match at start of line (^ or \s+)
+                footer_regex = re.compile(r"(?:^|\s+)\b([A-Z]{3,5}\s*[-–—]\s*[A-Z])")
                 footer_match = footer_regex.search(line)
                 if footer_match:
                      line = line[:footer_match.start()].strip()
+                     # Clean up trailing cluster leftovers (e.g. "Business Management and")
+                     line = re.sub(r"\s+(and|Cluster)$", "", line).strip()
+                     line = re.sub(r"\s+(Business Management|Hospitality|Finance|Marketing|Entrepreneurship|Administration)\s*$", "", line).strip()
                 
                 # Additional cleanups for ICDC footer remnants
                 if "specialist levels." in line:
                     line = line.replace("specialist levels.", "").strip()
                 if "Center®, Columbus, Ohio" in line:
                      line = line.split("Center®, Columbus, Ohio")[0].strip()
+                if "career -sustaining" in line:
+                    line = line.split("career -sustaining")[0].strip()
+                if line.endswith("Business Management and"):
+                    line = line[:-23].strip() 
                 
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
