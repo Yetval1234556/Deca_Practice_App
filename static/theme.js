@@ -1,10 +1,10 @@
 (function () {
   const KEY = "deca-theme";
-  const THEMES = ["light", "dark", "midnight", "forest", "ocean", "sunset", "lavender", "terminal"];
+  const THEMES = ["ocean", "light", "dark", "midnight", "forest", "sunset", "lavender", "terminal"];
 
   function applyTheme(value) {
     const normalized = typeof value === "string" ? value.toLowerCase() : "";
-    const theme = THEMES.includes(normalized) ? normalized : "light";
+    const theme = THEMES.includes(normalized) ? normalized : "ocean";
     document.documentElement.setAttribute("data-theme", theme);
     try {
       localStorage.setItem(KEY, theme);
@@ -19,7 +19,7 @@
     if (THEMES.includes(cached)) return cached;
     return (
       document.documentElement.getAttribute("data-theme") ||
-      (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")
+      (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "ocean" : "ocean")
     );
   }
 

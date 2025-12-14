@@ -820,11 +820,11 @@ function renderTestList() {
       { label: "25", value: 25 },
       { label: "50", value: 50 },
       { label: "100", value: 100 },
-    ].filter((opt) => opt.value === 0 || opt.value <= test.question_count);
+    ].filter((opt) => opt.value === 0 || opt.value < test.question_count);
     card.innerHTML = `
       <div class="test-meta">
         <h4>${escapeHtml(test.name)}</h4>
-        <p>${escapeHtml(test.description || "No description")}</p>
+        ${test.description ? `<p>${escapeHtml(test.description)}</p>` : ""}
         <p class="muted">${test.question_count} question${test.question_count === 1 ? "" : "s"}</p>
       </div>
       <div class="test-actions">
@@ -838,15 +838,7 @@ function renderTestList() {
         </label>
         <label style="${localStorage.getItem("deca-timer-disabled") === "true" ? "display:none" : ""}">
           <span class="muted small-label">Time Limit</span>
-          <select class="time-select" data-test-id="${test.id}">
-            <option value="0">None</option>
-            <option value="5">5m</option>
-            <option value="10">10m</option>
-            <option value="15">15m</option>
-            <option value="20">20m</option>
-            <option value="30">30m</option>
-            <option value="60">60m</option>
-          </select>
+          <input type="number" class="time-select" data-test-id="${test.id}" min="1" step="1" placeholder="Mins">
         </label>
         <button class="primary" data-test-id="${test.id}">
           <i class="ph ph-play"></i> Start
@@ -1683,21 +1675,26 @@ function closeCredits() {
   overlay.classList.add("hidden");
 }
 
+
 function initSettingsLogic() {
   const themeButtons = Array.from(document.querySelectorAll("[data-theme-option]"));
-
-  // Theme Logic
   const currentTheme = window.Theme ? window.Theme.get() : "light";
+
+  // 1. Update Visuals
   themeButtons.forEach((btn) => {
     const t = btn.dataset.theme;
     const isActive = t === currentTheme;
     btn.classList.toggle("active", isActive);
+  });
 
-    // Remove old listeners to avoid dupes (simple way: clone node? or just re-add is fine if careful)
-    // Actually, cleaner to just set onclick
+  // 2. Bind Listeners (only if not already bound - check a flag or just replace onclick)
+  // Replacing onclick is safe and easy here.
+  themeButtons.forEach((btn) => {
     btn.onclick = () => {
+      const t = btn.dataset.theme;
       if (window.Theme) window.Theme.apply(t);
-      initSettingsLogic(); // Re-render active state
+      // Update visuals manually instead of full recursion to be safer/faster
+      themeButtons.forEach(b => b.classList.toggle("active", b.dataset.theme === t));
     };
   });
 
@@ -1705,21 +1702,15 @@ function initSettingsLogic() {
   setupToggle("random-order-check", "deca-random-order", false);
   setupToggle("animations-toggle", "deca-animations-enabled", true);
   setupToggle("disable-timer-toggle", "deca-timer-disabled", false, (val) => {
-    // Immediate effect if session active
     if (state.timerInterval || state.sessionStart) {
-      if (val) stopSessionTimer(); // Killing the loop, but logic needs to handle resuming if unchecked? 
-      // Actually simpler: just reload or let next start handle it.
-      // Better: if active, just hide element? No, user wants it OFF.
-      // Let's just update the display visibility immediately.
       updateTimerDisplay();
     }
   });
   setupToggle("perf-mode-toggle", "deca-perf-mode", true, (val) => {
     document.documentElement.classList.toggle("perf-mode", val);
   });
-
-  // Audio Sync is handled by bg-music.js
 }
+
 
 function setupToggle(id, key, defaultVal, onChange) {
   const el = document.getElementById(id);
