@@ -941,6 +941,11 @@ function deleteTest(testId, name) {
 
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
     if (!testId) return;
+
+    // Clear search input if user navigated from search results
+    const searchInput = document.getElementById("global-search");
+    if (searchInput) searchInput.value = "";
+
     state.lastRequestedCount = count;
     const normalizedMinutes =
         typeof timeLimitMinutes === "number" && timeLimitMinutes >= 0
@@ -2015,7 +2020,7 @@ document.addEventListener("DOMContentLoaded", () => {
         if (!test || !test.questions) {
             try {
                 // Need to load it fully
-                await startTest(testId, { count: "all" }, true);
+                await startTest(testId, "all", "regular", 0);
                 const qIdx = state.questions.findIndex(q => q.number === questionNumber);
                 if (qIdx >= 0) {
                     goToQuestion(qIdx);
@@ -2029,7 +2034,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         if (state.activeTest?.id !== testId) {
-            await startTest(testId, { count: "all" }, true);
+            await startTest(testId, "all", "regular", 0);
         }
 
         const qIdx = state.questions.findIndex(q => q.number === questionNumber);
@@ -2070,7 +2075,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
                 if (res.ok) {
                     const data = await res.json();
-                    if (data.questions) {
+                    if (data.questions && Array.isArray(data.questions)) {
                         data.questions.forEach(q => {
                             if (targetIds.has(q.id)) {
                                 q._originalTestName = data.name || data.test?.name;
@@ -2080,7 +2085,7 @@ document.addEventListener("DOMContentLoaded", () => {
                     }
                 } else {
                     const cached = localTests.get(testId);
-                    if (cached && cached.questions) {
+                    if (cached && cached.questions && Array.isArray(cached.questions)) {
                         cached.questions.forEach(q => {
                             if (targetIds.has(q.id)) {
                                 q._originalTestName = cached.name;
@@ -2089,11 +2094,10 @@ document.addEventListener("DOMContentLoaded", () => {
                         });
                     }
                 }
-
             } catch (e) {
                 console.warn(`Failed to load test ${testId}`, e);
                 const cached = localTests.get(testId);
-                if (cached && cached.questions) {
+                if (cached && cached.questions && Array.isArray(cached.questions)) {
                     cached.questions.forEach(q => {
                         if (targetIds.has(q.id)) {
                             q._originalTestName = cached.name;
@@ -2143,3 +2147,5 @@ document.addEventListener("DOMContentLoaded", () => {
         updateSessionMeta();
     }
 }
+
+});
