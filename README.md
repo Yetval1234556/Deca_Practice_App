@@ -63,3 +63,8 @@ Built with ❤️ for DECA students.
 *   **Icons**: Phosphor Icons
 *   **Fonts**: Space Grotesk & Inter
 *   **Charts**: Chart.js
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).
+
