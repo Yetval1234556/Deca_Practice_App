@@ -183,22 +183,7 @@ function init() {
     setupEventListeners();
     applyThemeFromStorage();
 
-    // -- Search Logic --
-    const searchInput = document.getElementById("global-search");
-    if (searchInput) {
-        let debounceTimer;
-        searchInput.addEventListener("input", (e) => {
-            clearTimeout(debounceTimer);
-            const val = e.target.value.trim();
-            if (!val) {
-                renderTestList(); // Reset view
-                return;
-            }
-            debounceTimer = setTimeout(() => {
-                performSearch(val);
-            }, 300);
-        });
-    }
+
 
     if (activeTestName) activeTestName.textContent = "Select a test";
     updateSessionMeta();
@@ -941,10 +926,6 @@ function deleteTest(testId, name) {
 
 async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes = 0) {
     if (!testId) return;
-
-    // Clear search input if user navigated from search results
-    const searchInput = document.getElementById("global-search");
-    if (searchInput) searchInput.value = "";
 
     state.lastRequestedCount = count;
     const normalizedMinutes =
@@ -1942,107 +1923,6 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 
-    async function performSearch(query) {
-        if (!testListEl) return;
-        testListEl.innerHTML = '<p class="muted">Searching...</p>';
-
-        const lowerQ = query.toLowerCase();
-        const results = [];
-
-        // 1. Client-Side Search (Local Tests)
-        localTests.forEach(t => {
-            if (!t.questions) return;
-            t.questions.forEach(q => {
-                const txt = (q.prompt || q.question || "").toLowerCase();
-                if (txt.includes(lowerQ)) {
-                    results.push({
-                        test_id: t.id,
-                        test_name: t.name || "Uploaded Test",
-                        question_id: q.id,
-                        question_number: q.number,
-                        snippet: (q.prompt || q.question).substring(0, 150),
-                        isLocal: true
-                    });
-                }
-            });
-        });
-
-        // 2. Server-Side Search
-        try {
-            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { credentials: "same-origin" });
-            if (res.ok) {
-                const serverResults = await res.json();
-                if (Array.isArray(serverResults)) {
-                    results.push(...serverResults);
-                }
-            }
-        } catch (e) { console.error("Search API error", e); }
-
-        // Deduplicate (prefer local if same ID)
-        const seen = new Set();
-        const unique = [];
-        results.forEach(r => {
-            const key = `${r.test_id}-${r.question_id}`;
-            if (!seen.has(key)) {
-                seen.add(key);
-                unique.push(r);
-            }
-        });
-
-        // Render Results
-        if (unique.length === 0) {
-            testListEl.innerHTML = '<p class="muted">No matches found.</p>';
-            return;
-        }
-
-        testListEl.innerHTML = "";
-        const limit = unique.slice(0, 50); // Limit rendered results
-
-        limit.forEach(r => {
-            const div = document.createElement("div");
-            div.className = "test-card search-result";
-            div.innerHTML = `
-            <div class="test-info">
-                <h3>${escapeHtml(r.test_name)} <span class="badge">#${r.question_number}</span></h3>
-                <p class="desc">${escapeHtml(r.snippet)}</p>
-            </div>
-            <button class="secondary small">View</button>
-        `;
-            div.onclick = () => loadSearchMatch(r.test_id, r.question_number);
-            testListEl.appendChild(div);
-        });
-    }
-
-    async function loadSearchMatch(testId, questionNumber) {
-        // 1. Find the test object
-        let test = state.tests.find(t => t.id === testId);
-
-        if (!test || !test.questions) {
-            try {
-                // Need to load it fully
-                await startTest(testId, "all", "regular", 0);
-                const qIdx = state.questions.findIndex(q => q.number === questionNumber);
-                if (qIdx >= 0) {
-                    goToQuestion(qIdx);
-                }
-                return;
-            } catch (e) {
-                console.error("Failed to load search match", e);
-                alert("Could not load this question.");
-                return;
-            }
-        }
-
-        if (state.activeTest?.id !== testId) {
-            await startTest(testId, "all", "regular", 0);
-        }
-
-        const qIdx = state.questions.findIndex(q => q.number === questionNumber);
-        if (qIdx >= 0) {
-            goToQuestion(qIdx);
-        }
-    }
-
     async function startSmartReview() {
         if (!state.tests.length && !localTests.size) await fetchTests();
         const missed = MissedMgr.getAll();
@@ -2146,6 +2026,4 @@ document.addEventListener("DOMContentLoaded", () => {
         updateProgress();
         updateSessionMeta();
     }
-}
-
 });

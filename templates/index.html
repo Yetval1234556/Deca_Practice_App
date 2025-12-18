@@ -73,10 +73,7 @@
           <i class="ph ph-arrows-clockwise"></i>
         </button>
       </div>
-      <div class="search-box">
-        <i class="ph ph-magnifying-glass"></i>
-        <input type="text" id="global-search" placeholder="Search questions..." autocomplete="off">
-      </div>
+
       <div id="test-list" class="test-list">
         <p class="muted">Looking for tests in <code>tests/</code>...</p>
       </div>
@@ -257,70 +254,93 @@
         </section>
 
 
-        <div class="settings-grid-layout">
 
-          <section class="panel">
-            <div class="setting-header">
-              <i class="ph-duotone ph-shuffle symbol-small"></i>
-              <div class="setting-title">
-                <h4>Random Order</h4>
-                <p class="muted small">Shuffle questions for each run.</p>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="random-order-check" aria-label="Toggle Random Order">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </section>
-
-
-          <section class="panel">
-            <div class="setting-header">
-              <i class="ph-duotone ph-confetti symbol-small"></i>
-              <div class="setting-title">
-                <h4>Animations</h4>
-                <p class="muted small">Celebration effects on high scores.</p>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="animations-toggle" aria-label="Toggle Animations">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </section>
-
-
-          <section class="panel">
-            <div class="setting-header">
-              <i class="ph-duotone ph-timer symbol-small"></i>
-              <div class="setting-title">
-                <h4>Disable Timer</h4>
-                <p class="muted small">Hide the clock completely.</p>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="disable-timer-toggle" aria-label="Toggle Timer Disable">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </section>
-
-
-          <section class="panel">
-            <div class="setting-header">
-              <i class="ph-duotone ph-lightning symbol-small"></i>
-              <div class="setting-title">
-                <h4>Performance Mode</h4>
-                <p class="muted small">Remove visual effects to reduce lag.</p>
-              </div>
-              <label class="toggle">
-                <input type="checkbox" id="perf-mode-toggle" aria-label="Toggle Performance Mode">
-                <span class="slider"></span>
-              </label>
-            </div>
-          </section>
-
-        </div>
-      </main>
     </div>
+    </main>
+  </div>
+  </div>
+
+  <div id="settings-overlay" class="settings-overlay hidden">
+    <div class="settings-modal">
+      <div class="settings-topbar">
+        <div class="setting-header">
+          <i class="ph ph-gear symbol-small"></i>
+          <div class="setting-title">
+            <h4>Settings</h4>
+            <p class="muted">Customize your experience</p>
+          </div>
+          <button class="btn-icon" onclick="closeSettings()">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="settings-grid-layout" style="padding: 24px;">
+
+        <section class="panel">
+          <div class="setting-header">
+            <i class="ph-duotone ph-shuffle symbol-small"></i>
+            <div class="setting-title">
+              <h4>Random Order</h4>
+              <p class="muted small">Shuffle questions for each run.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="random-order-check" aria-label="Toggle Random Order">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+
+        <section class="panel">
+          <div class="setting-header">
+            <i class="ph-duotone ph-confetti symbol-small"></i>
+            <div class="setting-title">
+              <h4>Animations</h4>
+              <p class="muted small">Celebration effects on high scores.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="animations-toggle" aria-label="Toggle Animations">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+
+        <section class="panel">
+          <div class="setting-header">
+            <i class="ph-duotone ph-timer symbol-small"></i>
+            <div class="setting-title">
+              <h4>Disable Timer</h4>
+              <p class="muted small">Hide the clock completely.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="disable-timer-toggle" aria-label="Toggle Timer Disable">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+
+        <section class="panel">
+          <div class="setting-header">
+            <i class="ph-duotone ph-lightning symbol-small"></i>
+            <div class="setting-title">
+              <h4>Performance Mode</h4>
+              <p class="muted small">Remove visual effects to reduce lag.</p>
+            </div>
+            <label class="toggle">
+              <input type="checkbox" id="perf-mode-toggle" aria-label="Toggle Performance Mode">
+              <span class="slider"></span>
+            </label>
+          </div>
+        </section>
+
+      </div>
+    </div>
+  </div>
+  </main>
+  </div>
   </div>
 
 
