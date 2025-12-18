@@ -668,6 +668,35 @@ def check_answer(test_id, question_id):
     is_correct = (choice == q["correct_index"])
     return jsonify({"correct": is_correct})
 
+@app.route('/api/search', methods=['GET'])
+def search_questions():
+    query = request.args.get('q', '').lower().strip()
+    if not query or len(query) < 2:
+        return jsonify([])
+
+    results = []
+    # Search all tests (static + session)
+    all_tests = _get_all_tests_for_session()
+    
+    for test_id, test_data in all_tests.items():
+        if not test_data.get("questions"):
+            continue
+        
+        for q in test_data["questions"]:
+            text = (q.get("question") or "").lower()
+            if query in text:
+                results.append({
+                    "test_id": test_id,
+                    "test_name": test_data.get("name"),
+                    "question_id": q.get("id"),
+                    "question_number": q.get("number"),
+                    "snippet": q.get("question")[:150] + "..." if len(q.get("question")) > 150 else q.get("question"),
+                })
+                if len(results) >= 50: break
+        if len(results) >= 50: break
+            
+    return jsonify(results)
+
 @app.route("/api/tests/<test_id>/results", methods=["POST"])
 def store_results(test_id):
     sid = _get_session_id()

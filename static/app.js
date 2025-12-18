@@ -136,65 +136,125 @@ function setUploadStatus(message, isError = false) {
     uploadStatus.classList.toggle("error", Boolean(isError));
 }
 
-function localTestSummaries() {
-    return Array.from(localTests.values()).map((t) => ({
-        id: t.test?.id || t.id,
-        name: t.test?.name || t.name || "Uploaded Test",
-        description: t.description || "Client-cached test",
-        question_count: (t.questions && t.questions.length) || t.selected_count || 0,
-    }));
-}
-
-function persistLocalTests() {
-    if (typeof localStorage === "undefined") return;
-    try {
-        const payload = Array.from(localTests.entries()).map(([id, val]) => {
-
-            const { questions, ...meta } = val;
-            return { id, value: { ...meta, questions: [] } };
-        });
-        localStorage.setItem(LOCAL_TESTS_KEY, JSON.stringify(payload));
-    } catch (err) {
-        console.warn("Could not persist cached tests", err);
-    }
-}
-
-function hydrateLocalTests() {
-    if (typeof localStorage === "undefined") return;
-    try {
-        const raw = localStorage.getItem(LOCAL_TESTS_KEY);
-        if (!raw) return;
-        const payload = JSON.parse(raw);
-        if (!Array.isArray(payload)) return;
-        localTests.clear();
-        payload.forEach(item => {
-
-            if (item && item.id && item.value) {
-                localTests.set(item.id, item.value);
-            }
-        });
-    } catch (err) {
-        console.warn("Could not load cached tests", err);
-        localTests.clear();
-    }
-}
 
 function persistHiddenTests() {
-    if (typeof localStorage === "undefined") return;
-    try {
-        localStorage.setItem(HIDDEN_TESTS_KEY, JSON.stringify(Array.from(hiddenTestIds)));
-    } catch (e) { console.warn('Failed to persist hidden tests', e); }
+    localStorage.setItem("deca-hidden-tests", JSON.stringify(Array.from(hiddenTestIds)));
 }
 
-function hydrateHiddenTests() {
-    if (typeof localStorage === "undefined") return;
+function persistLocalTestToIDB(testData) {
+    if (!testData || !testData.id) return;
+    // Ensure we save the full object structure expected by fetching/hydration
+    const record = {
+        id: testData.id,
+        name: testData.name,
+        description: testData.description,
+        questions: testData.questions || [],
+        question_count: (testData.questions || []).length,
+        timestamp: Date.now()
+    };
+    IDB.saveTest(record).catch(e => console.error("Failed to save to IDB", e));
+}
+
+function deleteLocalTestFromIDB(testId) {
+    IDB.deleteTest(testId).catch(e => console.error("Failed to delete from IDB", e));
+}
+
+function init() {
     try {
-        const raw = localStorage.getItem(HIDDEN_TESTS_KEY);
-        if (raw) {
-            const arr = JSON.parse(raw);
-            arr.forEach(id => hiddenTestIds.add(id));
+        const storedHidden = localStorage.getItem("deca-hidden-tests");
+        if (storedHidden) {
+            const parsed = JSON.parse(storedHidden);
+            if (Array.isArray(parsed)) parsed.forEach(id => hiddenTestIds.add(id));
         }
-    } catch (e) { console.warn('Failed to hydrate hidden tests', e); }
+    } catch (e) { console.error("Error loading hidden tests", e); }
+
+    const storedTimerHidden = localStorage.getItem("deca-timer-hidden");
+    state.timerHidden = storedTimerHidden === "true";
+
+    const storedGridCollapsed = localStorage.getItem("deca-grid-collapsed");
+    state.questionGridCollapsed = storedGridCollapsed !== "false";
+
+    const storedDisableTimer = localStorage.getItem("deca-timer-disabled");
+    if (disableTimerToggle) {
+        disableTimerToggle.checked = storedDisableTimer === "true";
+    }
+
+    fetchTests();
+    setupEventListeners();
+    applyThemeFromStorage();
+
+    // -- Search Logic --
+    const searchInput = document.getElementById("global-search");
+    if (searchInput) {
+        let debounceTimer;
+        searchInput.addEventListener("input", (e) => {
+            clearTimeout(debounceTimer);
+            const val = e.target.value.trim();
+            if (!val) {
+                renderTestList(); // Reset view
+                return;
+            }
+            debounceTimer = setTimeout(() => {
+                performSearch(val);
+            }, 300);
+        });
+    }
+
+    if (activeTestName) activeTestName.textContent = "Select a test";
+    updateSessionMeta();
+    renderQuestionGrid();
+
+    const savedSession = localStorage.getItem("deca-session-backup");
+    if (savedSession) {
+        try {
+            const parsed = JSON.parse(savedSession);
+            if (parsed && parsed.activeTestId && !state.sessionComplete) {
+                restoreSession(parsed);
+            }
+        } catch (e) { console.error("Session restore failed", e); }
+    }
+}
+
+async function fetchTests() {
+    if (testListEl) testListEl.innerHTML = '<p class="muted">Loading tests...</p>';
+    state.tests = [];
+    const uniqueMap = new Map();
+
+    // 1. Load from Server
+    try {
+        const res = await fetch("/api/tests", { credentials: "same-origin" });
+        if (res.ok) {
+            const list = await res.json();
+            if (Array.isArray(list)) {
+                list.forEach(t => uniqueMap.set(t.id, t));
+            }
+        }
+    } catch (err) {
+        console.warn("Server unavailable?", err);
+    }
+
+    // 2. Load from IndexedDB
+    try {
+        const localItems = await IDB.getAllTests();
+        if (localItems && Array.isArray(localItems)) {
+            localItems.forEach(t => {
+                if (!uniqueMap.has(t.id)) {
+                    uniqueMap.set(t.id, {
+                        ...t,
+                        isLocal: true,
+                        name: t.name || "Local Test"
+                    });
+                }
+            });
+        }
+    } catch (e) {
+        console.error("IDB Error", e);
+    }
+
+    state.tests = Array.from(uniqueMap.values()).filter(t => !hiddenTestIds.has(t.id));
+    state.tests.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+    renderTestList();
 }
 
 function toggleStrike(e, idx, qId) {
@@ -211,58 +271,7 @@ function toggleStrike(e, idx, qId) {
     } else {
         currentSet.add(idx);
     }
-
-
-
-
     renderQuestionCard();
-}
-
-
-
-
-async function fetchTests() {
-    if (testListEl) {
-        testListEl.innerHTML = `<p class="muted">Loading tests...</p>`;
-    }
-    try {
-        const res = await fetch("/api/tests", { cache: "no-store", credentials: "same-origin" });
-        if (!res.ok) throw new Error("Failed to load tests");
-        const data = await res.json();
-        const serverTests = [];
-
-
-        (data || []).forEach((t) => {
-            serverTests.push(t);
-
-
-            const existing = localTests.get(t.id);
-
-
-            if (!existing || !existing.questions) {
-                localTests.set(t.id, t);
-            }
-        });
-
-
-        const locals = localTestSummaries();
-
-        const combined = [...serverTests, ...locals.filter(lt => !serverTests.some(st => st.id === lt.id))];
-
-
-        state.tests = combined.filter(t => !hiddenTestIds.has(t.id));
-
-        persistLocalTests();
-        renderTestList();
-    } catch (err) {
-        const merged = localTestSummaries();
-        state.tests = merged.filter(t => !hiddenTestIds.has(t.id));
-        if (testListEl) {
-            const extra = merged.length ? "Showing cached uploads." : "";
-            const msg = escapeHtml(err.message || "Unknown error");
-            testListEl.innerHTML = `<p class="muted">Could not load tests. ${msg}. ${extra}</p>`;
-        }
-    }
 }
 
 async function refreshTestsWithRetry(retries = 2, delayMs = 300) {
@@ -283,79 +292,30 @@ async function handleUpload() {
     formData.append("file", file);
     setUploadStatus("Uploading...", false);
     uploadBtn.disabled = true;
+
     try {
         const res = await fetch("/api/upload_pdf", {
             method: "POST",
             body: formData,
             credentials: "same-origin",
         });
+
         const data = await res.json().catch(() => null);
         if (!res.ok || !data) {
-            const msg = (data && (data.description || data.error || data.message)) || "Upload failed.";
-            throw new Error(msg);
+            throw new Error((data && (data.description || data.error || data.message)) || "Upload failed.");
         }
-        setUploadStatus(`Uploaded "${data.name}" (${data.question_count} questions). Caching...`);
+
+        // Save entire test response (which includes questions) to IndexedDB
+        // structure of data: { id, name, questions: [...], ... }
+        persistLocalTestToIDB(data);
+
+        setUploadStatus(`Uploaded "${data.name}" (${(data.questions || []).length} questions). Saved offline.`);
         uploadInput.value = "";
 
+        // Refresh list to show new test
+        await fetchTests();
 
-
-
-        persistLocalTests();
-
-
-
-        const locals = localTestSummaries();
-
-        const combined = [data, ...locals.filter(lt => lt.id !== data.id)];
-
-
-        state.tests = combined.filter(t => !hiddenTestIds.has(t.id));
-
-        renderTestList();
-
-
-        try {
-            const preload = await fetch(`/api/tests/${encodeURIComponent(data.id)}/start_quiz`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                credentials: "same-origin",
-                body: JSON.stringify({
-                    count: 0,
-                    mode: "regular",
-                    time_limit_seconds: DEFAULT_TIME_LIMIT_MINUTES * 60,
-                }),
-            });
-            const preloadBody = await preload.text();
-            const preloadData = preloadBody ? JSON.parse(preloadBody) : null;
-            if (preload.ok && preloadData && Array.isArray(preloadData.questions) && preloadData.questions.length) {
-                const enriched = {
-                    ...preloadData,
-                    description: data.description || preloadData.description,
-                    name: data.name || preloadData.name,
-                };
-                if (enriched.test) {
-                    enriched.test.description = data.description || enriched.test.description;
-                    enriched.test.name = data.name || enriched.test.name;
-                }
-                localTests.set(data.id, enriched);
-                persistLocalTests();
-                setUploadStatus(`Uploaded and cached "${data.name}". Ready to start.`);
-
-                setTimeout(() => setUploadStatus(""), 8000);
-            } else {
-                localTests.delete(data.id);
-                persistLocalTests();
-                setUploadStatus(`Uploaded "${data.name}".`, false);
-                setTimeout(() => setUploadStatus(""), 8000);
-            }
-        } catch (cacheErr) {
-            localTests.delete(data.id);
-            persistLocalTests();
-            setUploadStatus(`Uploaded "${data.name}".`, false);
-            setTimeout(() => setUploadStatus(""), 8000);
-        }
-
-
+        setTimeout(() => setUploadStatus(""), 5000);
 
     } catch (err) {
         setUploadStatus(err.message || "Upload failed.", true);
@@ -844,8 +804,32 @@ function normalizeTimeLimitInput(value) {
 
 function renderTestList() {
     testListEl.innerHTML = "";
+
+    // Smart Review Card
+    const missedCount = MissedMgr.getCount();
+    if (missedCount > 0) {
+        const div = document.createElement("div");
+        div.className = "test-card special-card";
+        div.style.borderColor = "var(--primary)";
+        div.innerHTML = `
+            <div class="test-meta">
+                <h4><i class="ph ph-target" style="color:var(--primary)"></i> Practice Weaknesses</h4>
+                <p>You have <strong>${missedCount}</strong> missed question${missedCount === 1 ? '' : 's'} saved directly for review.</p>
+            </div>
+            <div class="test-actions">
+                <button class="primary" id="start-smart-review">
+                    <i class="ph ph-lightning"></i> Review Now
+                </button>
+            </div>
+        `;
+        div.querySelector("#start-smart-review").onclick = startSmartReview;
+        testListEl.appendChild(div);
+    }
+
     if (!state.tests.length) {
-        testListEl.innerHTML = `<p class="muted">No tests yet. Upload a DECA PDF to begin.</p>`;
+        if (missedCount === 0) {
+            testListEl.innerHTML = `<p class="muted">No tests yet. Upload a DECA PDF to begin.</p>`;
+        }
         return;
     }
     state.tests.forEach((test) => {
@@ -880,6 +864,9 @@ function renderTestList() {
         <button class="primary" data-test-id="${test.id}">
           <i class="ph ph-play"></i> Start
         </button>
+        <button class="secondary exam-btn" data-test-id="${test.id}" title="Simulate Exam (No feedback, strict timer)">
+          <i class="ph ph-graduation-cap"></i> Exam
+        </button>
         <button class="ghost delete-btn" data-test-id="${test.id}" title="Remove from list">
           <i class="ph ph-trash"></i>
         </button>
@@ -888,6 +875,7 @@ function renderTestList() {
 
 
         const startBtn = card.querySelector("button.primary");
+        const examBtn = card.querySelector("button.exam-btn");
         const deleteBtn = card.querySelector("button.ghost.delete-btn");
 
         const selectEl = card.querySelector(".count-select");
@@ -908,6 +896,17 @@ function renderTestList() {
             const parsed = normalizeTimeLimitInput(timeSelect.value);
             startTest(test.id, count, "regular", parsed.minutes);
         });
+
+        if (examBtn) {
+            examBtn.addEventListener("click", () => {
+                if (window.sfx) window.sfx.playSelect();
+                const count = Number(selectEl.value);
+                const parsed = normalizeTimeLimitInput(timeSelect.value);
+                // Force a reasonable time limit if none set, or use user's
+                const limit = parsed.minutes > 0 ? parsed.minutes : 90;
+                startTest(test.id, count, "exam", limit);
+            });
+        }
 
         if (deleteBtn) {
             deleteBtn.addEventListener("click", () => {
@@ -1259,17 +1258,25 @@ function renderQuestionCard() {
     let feedbackClass = "";
 
     if (status) {
-        if (status.correct === true) {
-            feedbackText = "Correct! Well done.";
-            feedbackClass = "correct";
-        } else if (status.correct === false) {
-            feedbackText = "Incorrect.";
-            feedbackClass = "incorrect";
-        } else if (status.revealed) {
-            feedbackText = "Answer revealed.";
+        if (state.mode === "exam") {
+            feedbackText = "Answer saved.";
+        } else {
+            if (status.correct === true) {
+                feedbackText = "Correct! Well done.";
+                feedbackClass = "correct";
+            } else if (status.correct === false) {
+                feedbackText = "Incorrect.";
+                feedbackClass = "incorrect";
+            } else if (status.revealed) {
+                feedbackText = "Answer revealed.";
+            }
         }
     } else if (state.currentSelection !== null) {
-        feedbackText = "Press 'Submit Answer' to check.";
+        if (state.mode === "exam") {
+            feedbackText = "Press 'Next' to save.";
+        } else {
+            feedbackText = "Press 'Submit Answer' to check.";
+        }
     }
 
     const isLast = state.currentIndex === state.questions.length - 1;
@@ -1279,7 +1286,7 @@ function renderQuestionCard() {
     <div class="question-head">
       <div>
         <p class="eyebrow">
-            Question ${state.currentIndex + 1} of ${state.questions.length} ${question.number ? `| #${question.number}` : ""}
+            Question ${state.currentIndex + 1} of ${state.questions.length} ${question.number ? `| #${question.number}` : ""} ${state.mode === "exam" ? "(Exam Mode)" : ""}
         </p>
         <div class="question-text">${escapeHtml(tidyText(question.question))}</div>
       </div>
@@ -1306,7 +1313,7 @@ function renderQuestionCard() {
     <div id="feedback" class="feedback ${feedbackClass}" style="display: ${status || state.currentSelection !== null ? 'block' : 'none'}">
       ${feedbackText}
     </div>
-    <div id="explanation" class="explanation ${status && (status.revealed || status.correct !== undefined) ? "" : "hidden"}"></div>
+    <div id="explanation" class="explanation ${status && (status.revealed || status.correct !== undefined) && state.mode !== "exam" ? "" : "hidden"}"></div>
     <div class="actions">
       <button id="prev-question" class="ghost" ${controlsDisabled ? "disabled" : ""}>
         <i class="ph ph-caret-left"></i> Previous
@@ -1316,8 +1323,8 @@ function renderQuestionCard() {
       </button>
 
       ${!status
-            ? `<button id="submit-answer-btn" class="primary" ${state.currentSelection === null ? "disabled" : ""}>Submit Answer</button>`
-            : `<button id="show-answer" class="ghost" ${controlsDisabled ? "disabled" : ""}>
+            ? `<button id="submit-answer-btn" class="primary" ${state.currentSelection === null ? "disabled" : ""}>${state.mode === "exam" ? "Save & Next" : "Submit Answer"}</button>`
+            : `<button id="show-answer" class="ghost" ${controlsDisabled || state.mode === "exam" ? "disabled" : ""}>
               <i class="ph ph-eye"></i> Show Exp
              </button>`
         }
@@ -1347,11 +1354,19 @@ function renderQuestionCard() {
 
 
         if (status) {
-            if (status.choice === idx) {
-                btn.classList.add(status.correct ? "correct" : "incorrect");
-            }
-            if (status.revealed && status.correctIndex === idx) {
-                btn.classList.add("revealed", "correct");
+
+            if (state.mode === "exam" && !state.sessionComplete) {
+                // In exam mode, just show selected
+                if (status.choice === idx) {
+                    btn.classList.add("selected");
+                }
+            } else {
+                if (status.choice === idx) {
+                    btn.classList.add(status.correct ? "correct" : "incorrect");
+                }
+                if (status.revealed && status.correctIndex === idx) {
+                    btn.classList.add("revealed", "correct");
+                }
             }
         }
 
@@ -1359,8 +1374,10 @@ function renderQuestionCard() {
             btn.classList.add("selected");
         }
 
-        if (status && status.correctIndex === idx && (status.correct === false || status.revealed)) {
-            btn.classList.add("correct-highlight");
+        if (state.mode !== "exam" || state.sessionComplete) {
+            if (status && status.correctIndex === idx && (status.correct === false || status.revealed)) {
+                btn.classList.add("correct-highlight");
+            }
         }
     });
 
@@ -1416,6 +1433,35 @@ async function submitCurrentAnswer() {
 }
 
 
+
+// -- Smart Review / Missed Questions Manager --
+const MissedMgr = {
+    key: "deca-missed-questions",
+    getAll() {
+        try {
+            return JSON.parse(localStorage.getItem(this.key) || "[]");
+        } catch { return []; }
+    },
+    add(testId, questionId) {
+        const list = this.getAll();
+        if (!list.find(i => i.t === testId && i.q === questionId)) {
+            list.push({ t: testId, q: questionId, d: Date.now() });
+            localStorage.setItem(this.key, JSON.stringify(list));
+        }
+    },
+    remove(testId, questionId) {
+        let list = this.getAll();
+        const initLen = list.length;
+        list = list.filter(i => !(i.t === testId && i.q === questionId));
+        if (list.length !== initLen) {
+            localStorage.setItem(this.key, JSON.stringify(list));
+        }
+    },
+    getCount() {
+        return this.getAll().length;
+    }
+};
+
 async function handleAnswer(question, choiceIndex) {
     if (state.sessionComplete || state.endedByTimer) return;
     recordCurrentQuestionTime();
@@ -1432,10 +1478,7 @@ async function handleAnswer(question, choiceIndex) {
             isCorrect = choiceIndex === q.correct_index;
             details = { correctIndex: q.correct_index, correctLetter: q.correct_letter, explanation: q.explanation };
         } else {
-
-
-
-
+            // ... server check ...
             const res = await fetch(
                 `/api/tests/${encodeURIComponent(state.activeTest.id)}/check/${encodeURIComponent(question.id)}`,
                 {
@@ -1449,8 +1492,6 @@ async function handleAnswer(question, choiceIndex) {
             const data = await res.json();
             isCorrect = Boolean(data.correct);
 
-
-
             const detailsRes = await fetch(
                 `/api/tests/${encodeURIComponent(state.activeTest.id)}/answer/${encodeURIComponent(question.id)}`,
                 { credentials: "same-origin" }
@@ -1458,6 +1499,13 @@ async function handleAnswer(question, choiceIndex) {
             if (detailsRes.ok) {
                 details = await detailsRes.json();
             }
+        }
+
+        // Smart Review Tracking
+        if (!isCorrect) {
+            MissedMgr.add(state.activeTest.id, questionId);
+        } else {
+            MissedMgr.remove(state.activeTest.id, questionId);
         }
 
         // Check if question is still current to prevent race conditions
@@ -1472,12 +1520,12 @@ async function handleAnswer(question, choiceIndex) {
             choice: choiceIndex,
             correct: isCorrect,
             ...details,
-            revealed: true
+            revealed: state.mode !== "exam"
         };
 
         state.currentSelection = null;
 
-        if (window.sfx) {
+        if (window.sfx && state.mode !== "exam") {
             if (isCorrect) window.sfx.playCorrect();
             else window.sfx.playIncorrect();
         }
@@ -1485,6 +1533,18 @@ async function handleAnswer(question, choiceIndex) {
         recomputeScoreFromAnswers();
         renderQuestionCard();
         persistSession();
+
+        // Auto-advance in exam mode for smoother flow
+        if (state.mode === "exam") {
+            setTimeout(() => {
+                if (state.currentIndex < state.questions.length - 1) {
+                    nextQuestion();
+                } else {
+                    // Last question
+                    renderQuestionCard(); // Update UI to show saved state
+                }
+            }, 200);
+        }
     } catch (err) {
 
         console.error("Submission failed:", err);
@@ -1875,6 +1935,211 @@ document.addEventListener("DOMContentLoaded", () => {
     } catch (e) { }
 
 
-    fetchTests();
 
-});
+
+    async function performSearch(query) {
+        if (!testListEl) return;
+        testListEl.innerHTML = '<p class="muted">Searching...</p>';
+
+        const lowerQ = query.toLowerCase();
+        const results = [];
+
+        // 1. Client-Side Search (Local Tests)
+        localTests.forEach(t => {
+            if (!t.questions) return;
+            t.questions.forEach(q => {
+                const txt = (q.prompt || q.question || "").toLowerCase();
+                if (txt.includes(lowerQ)) {
+                    results.push({
+                        test_id: t.id,
+                        test_name: t.name || "Uploaded Test",
+                        question_id: q.id,
+                        question_number: q.number,
+                        snippet: (q.prompt || q.question).substring(0, 150),
+                        isLocal: true
+                    });
+                }
+            });
+        });
+
+        // 2. Server-Side Search
+        try {
+            const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`, { credentials: "same-origin" });
+            if (res.ok) {
+                const serverResults = await res.json();
+                if (Array.isArray(serverResults)) {
+                    results.push(...serverResults);
+                }
+            }
+        } catch (e) { console.error("Search API error", e); }
+
+        // Deduplicate (prefer local if same ID)
+        const seen = new Set();
+        const unique = [];
+        results.forEach(r => {
+            const key = `${r.test_id}-${r.question_id}`;
+            if (!seen.has(key)) {
+                seen.add(key);
+                unique.push(r);
+            }
+        });
+
+        // Render Results
+        if (unique.length === 0) {
+            testListEl.innerHTML = '<p class="muted">No matches found.</p>';
+            return;
+        }
+
+        testListEl.innerHTML = "";
+        const limit = unique.slice(0, 50); // Limit rendered results
+
+        limit.forEach(r => {
+            const div = document.createElement("div");
+            div.className = "test-card search-result";
+            div.innerHTML = `
+            <div class="test-info">
+                <h3>${escapeHtml(r.test_name)} <span class="badge">#${r.question_number}</span></h3>
+                <p class="desc">${escapeHtml(r.snippet)}</p>
+            </div>
+            <button class="secondary small">View</button>
+        `;
+            div.onclick = () => loadSearchMatch(r.test_id, r.question_number);
+            testListEl.appendChild(div);
+        });
+    }
+
+    async function loadSearchMatch(testId, questionNumber) {
+        // 1. Find the test object
+        let test = state.tests.find(t => t.id === testId);
+
+        if (!test || !test.questions) {
+            try {
+                // Need to load it fully
+                await startTest(testId, { count: "all" }, true);
+                const qIdx = state.questions.findIndex(q => q.number === questionNumber);
+                if (qIdx >= 0) {
+                    goToQuestion(qIdx);
+                }
+                return;
+            } catch (e) {
+                console.error("Failed to load search match", e);
+                alert("Could not load this question.");
+                return;
+            }
+        }
+
+        if (state.activeTest?.id !== testId) {
+            await startTest(testId, { count: "all" }, true);
+        }
+
+        const qIdx = state.questions.findIndex(q => q.number === questionNumber);
+        if (qIdx >= 0) {
+            goToQuestion(qIdx);
+        }
+    }
+
+    async function startSmartReview() {
+        if (!state.tests.length && !localTests.size) await fetchTests();
+        const missed = MissedMgr.getAll();
+        if (!missed.length) {
+            alert("No missed questions found!");
+            renderTestList();
+            return;
+        }
+
+        testListEl.innerHTML = '<p class="muted">Generating review session...</p>';
+
+        const byTest = {};
+        missed.forEach(item => {
+            if (!byTest[item.t]) byTest[item.t] = [];
+            byTest[item.t].push(item.q);
+        });
+
+        const combinedQuestions = [];
+
+        for (const testId of Object.keys(byTest)) {
+            const targetIds = new Set(byTest[testId]);
+
+            try {
+                const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    credentials: "same-origin",
+                    body: JSON.stringify({ count: 9999, mode: "regular" }),
+                });
+
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.questions) {
+                        data.questions.forEach(q => {
+                            if (targetIds.has(q.id)) {
+                                q._originalTestName = data.name || data.test?.name;
+                                combinedQuestions.push(q);
+                            }
+                        });
+                    }
+                } else {
+                    const cached = localTests.get(testId);
+                    if (cached && cached.questions) {
+                        cached.questions.forEach(q => {
+                            if (targetIds.has(q.id)) {
+                                q._originalTestName = cached.name;
+                                combinedQuestions.push(q);
+                            }
+                        });
+                    }
+                }
+
+            } catch (e) {
+                console.warn(`Failed to load test ${testId}`, e);
+                const cached = localTests.get(testId);
+                if (cached && cached.questions) {
+                    cached.questions.forEach(q => {
+                        if (targetIds.has(q.id)) {
+                            q._originalTestName = cached.name;
+                            combinedQuestions.push(q);
+                        }
+                    });
+                }
+            }
+        }
+
+        if (!combinedQuestions.length) {
+            alert("Could not load any missed questions.");
+            renderTestList();
+            return;
+        }
+
+        state.activeTest = {
+            id: "smart-review",
+            name: "Weakness Review",
+            description: `Reviewing ${combinedQuestions.length} missed questions.`
+        };
+        state.mode = "review_incorrect";
+        state.questions = shuffleQuestions(combinedQuestions);
+        state.currentIndex = 0;
+        state.score = 0;
+        state.answers = {};
+        state.strikes = {};
+        state.currentSelection = null;
+        state.timeLimitMs = 0;
+        state.timeRemainingMs = 0;
+        state.sessionStart = Date.now();
+        state.questionStart = Date.now();
+        state.sessionComplete = false;
+        state.endedByTimer = false;
+        state.resultsPersisted = false;
+        state.timerHidden = false;
+
+        activeTestName.textContent = state.activeTest.name;
+        questionArea.classList.remove("hidden");
+        summaryArea.classList.add("hidden");
+        testListEl.innerHTML = "";
+
+        startSessionTimer();
+        renderQuestionCard();
+        updateScore();
+        updateProgress();
+        updateSessionMeta();
+    }
+}

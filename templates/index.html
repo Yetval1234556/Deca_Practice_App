@@ -73,6 +73,10 @@
           <i class="ph ph-arrows-clockwise"></i>
         </button>
       </div>
+      <div class="search-box">
+        <i class="ph ph-magnifying-glass"></i>
+        <input type="text" id="global-search" placeholder="Search questions..." autocomplete="off">
+      </div>
       <div id="test-list" class="test-list">
         <p class="muted">Looking for tests in <code>tests/</code>...</p>
       </div>
@@ -173,7 +177,7 @@
     </section>
   </main>
 
-  
+
   <div id="settings-overlay" class="settings-overlay hidden">
     <div class="settings-modal">
       <header class="topbar settings-topbar">
@@ -191,7 +195,7 @@
       </header>
 
       <main class="settings-layout-modal">
-        
+
         <section class="panel">
           <div class="setting-row stacked">
             <div>
@@ -252,9 +256,9 @@
           </div>
         </section>
 
-        
+
         <div class="settings-grid-layout">
-          
+
           <section class="panel">
             <div class="setting-header">
               <i class="ph-duotone ph-shuffle symbol-small"></i>
@@ -269,7 +273,7 @@
             </div>
           </section>
 
-          
+
           <section class="panel">
             <div class="setting-header">
               <i class="ph-duotone ph-confetti symbol-small"></i>
@@ -284,7 +288,7 @@
             </div>
           </section>
 
-          
+
           <section class="panel">
             <div class="setting-header">
               <i class="ph-duotone ph-timer symbol-small"></i>
@@ -299,7 +303,7 @@
             </div>
           </section>
 
-          
+
           <section class="panel">
             <div class="setting-header">
               <i class="ph-duotone ph-lightning symbol-small"></i>
@@ -319,7 +323,7 @@
     </div>
   </div>
 
-  
+
   <div id="credits-overlay" class="settings-overlay hidden">
     <div class="settings-modal" style="max-width: 600px; margin: auto;">
       <div class="settings-topbar">
@@ -372,6 +376,7 @@
   </div>
 
   <script src="{{ url_for('static', filename='theme.js') }}"></script>
+  <script src="{{ url_for('static', filename='db.js') }}"></script>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 
