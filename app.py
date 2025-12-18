@@ -48,15 +48,21 @@ if not SECRET_KEY:
         print("⚠️  WARNING: Using default SECRET_KEY in development")
 SESSION_CLEANUP_AGE_SECONDS = 86400
 
-DB_PATH = INSTANCE_DIR / "sessions.db"
+# Ensure DB is in a writable location
+DB_PATH = SESSION_DATA_DIR / "sessions.db"
 
 def _init_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT, updated_at REAL)")
             conn.commit()
+        print(f"✅ Database initialized at {DB_PATH}")
     except Exception as e:
-        print(f"⚠️  DB Init Failed: {e}")
+        print(f"❌ FATAL: Database initialization failed: {e}")
+        print(f"Database path: {DB_PATH}")
+        print("Application cannot continue without database.")
+        import sys
+        sys.exit(1)
 
 _init_db()  
 
@@ -67,18 +73,26 @@ app.config.update(
     SESSION_TYPE="filesystem",
 )
 
+import threading
+def _background_cleanup():
+    """Run cleanup periodically in background"""
+    import time
+    while True:
+        time.sleep(3600)
+        try:
+            _cleanup_old_sessions()
+        except Exception as e:
+            print(f"Background cleanup error: {e}")
+
+cleanup_thread = threading.Thread(target=_background_cleanup, daemon=True)
+cleanup_thread.start()
+
 def _normalize_whitespace(text: str) -> str:
     if not isinstance(text, str):
         return ""
     
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     
-    
-    
-    for _ in range(3):
-         
-         text = re.sub(r"\b([b-hj-zB-HJ-Z])\s+([a-zA-Z])", r"\1\2", text)
-         
     text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -168,6 +182,12 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     line = line[:-23].strip() 
                 if "sustaining, specialist, supervi" in line:
                     line = line.split("sustaining, specialist, supervi")[0].strip()
+                
+                # Enhanced strict footer stripping
+                line = re.sub(r"(?:^|\s+)Hospitality and Tourism.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Business Management.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)\d{4}-\d{4}.*$", "", line).strip()
+                line = re.sub(r"(?:^|\s+)Copyright.*$", "", line, flags=re.IGNORECASE).strip()
                 
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
@@ -455,6 +475,15 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
         print(f"⚠️  Parsing error for '{name_hint}': {e}")
         return {}
 
+def _sanitize_questions(questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    sanitized = []
+    for q in questions:
+        q_copy = dict(q)
+        for key in ("correct_index", "correct_letter", "explanation"):
+            q_copy.pop(key, None)
+        sanitized.append(q_copy)
+    return sanitized
+
 def _get_session_id() -> str:
     if "sid" not in session:
         session["sid"] = uuid.uuid4().hex
@@ -497,10 +526,13 @@ def _cleanup_old_sessions():
     except Exception as e:
         print(f"Cleanup error: {e}")
 
-def _get_all_tests_for_session() -> Dict[str, Any]:
+def _get_all_tests_for_session(force_refresh=False) -> Dict[str, Any]:
     all_tests = {}
     
     global _STATIC_TESTS_CACHE
+    if force_refresh:
+        _STATIC_TESTS_CACHE.clear()
+
     if not _STATIC_TESTS_CACHE:
         for p in tests_dir_iter():
             parsed = _parse_pdf_source(p, p.stem)
@@ -526,12 +558,7 @@ _STATIC_TESTS_CACHE = {}
 
 @app.route("/")
 def home():
-    
-    if random.random() < 0.05:  
-        _cleanup_old_sessions()
-        
     sid = _get_session_id()
-    
     _load_session_data(sid)
     return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 
@@ -541,7 +568,8 @@ def settings():
 
 @app.route("/api/tests")
 def list_tests():
-    data = _get_all_tests_for_session()
+    force = request.args.get("reload") == "1"
+    data = _get_all_tests_for_session(force_refresh=force)
     payload = []
     for t in data.values():
         payload.append({
@@ -563,10 +591,12 @@ def get_questions(test_id):
     count = request.args.get("count", type=int)
     if count and count > 0:
         qs = qs[:min(count, MAX_QUESTIONS_PER_RUN)]
+    
+    sanitized_questions = _sanitize_questions(qs)
         
     return jsonify({
         "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
-        "questions": qs,
+        "questions": sanitized_questions,
         "selected_count": len(qs)
     })
 
@@ -602,14 +632,7 @@ def start_quiz(test_id):
         limit = 0
         
 
-    # Sanitize questions to remove answers
-    sanitized_questions = []
-    for q in questions:
-        q_copy = q.copy()
-        q_copy.pop("correct_index", None)
-        q_copy.pop("correct_letter", None)
-        q_copy.pop("explanation", None)
-        sanitized_questions.append(q_copy)
+    sanitized_questions = _sanitize_questions(questions)
 
     return jsonify({
         "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
@@ -649,7 +672,10 @@ def upload_pdf():
     return jsonify({
         "id": uid,
         "name": parsed["name"],
-        "question_count": len(parsed["questions"])
+        "description": parsed.get("description", ""),
+        "questions": parsed["questions"],
+        "question_count": len(parsed["questions"]),
+        "test": {"id": uid, "name": parsed["name"], "total": len(parsed["questions"])}
     })
 
 @app.route("/api/tests/<test_id>/check/<question_id>", methods=["POST"])
@@ -668,12 +694,11 @@ def check_answer(test_id, question_id):
     is_correct = (choice == q["correct_index"])
     return jsonify({"correct": is_correct})
 
-
-
 @app.route("/api/tests/<test_id>/results", methods=["POST"])
 def store_results(test_id):
     sid = _get_session_id()
-    results = request.json.get("results", [])
+    payload = request.get_json(silent=True) or {}
+    results = payload.get("results", [])
     if not results: return jsonify({"missed_count": 0})
     
     missed_ids = []
