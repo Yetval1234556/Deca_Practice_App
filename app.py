@@ -27,7 +27,7 @@ except Exception:
 try:
     SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    # Fallback to temp dir for read-only filesystems (common in containers)
+    
     print("⚠️  WARNING: Read-only filesystem detected. Using /tmp for sessions.")
     SESSION_DATA_DIR = Path(tempfile.gettempdir()) / "deca_app_sessions"
     SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -39,14 +39,14 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     if os.getenv("ENVIRONMENT") == "production":
-         # Fallback to random key instead of crashing
+         
          import secrets
          SECRET_KEY = secrets.token_hex(32)
          print("⚠️  WARNING: SECRET_KEY not set in production. Generated temporary key.")
     else:
         SECRET_KEY = "dev-secret-key"
         print("⚠️  WARNING: Using default SECRET_KEY in development")
-SESSION_CLEANUP_AGE_SECONDS = 86400  # 24 hours
+SESSION_CLEANUP_AGE_SECONDS = 86400  
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = SECRET_KEY
@@ -58,13 +58,13 @@ app.config.update(
 def _normalize_whitespace(text: str) -> str:
     if not isinstance(text, str):
         return ""
-    # Fix merged words like "theEnd" -> "the End"
+    
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     
-    # Fix split words: single consonant followed by another letter (e.g. "t e s t" -> "test")
-    # We repeat this to handle multiple splits in a row
+    
+    
     for _ in range(3):
-         # Merge singleton consonant (not 'a' or 'i') with following letter
+         
          text = re.sub(r"\b([b-hj-zB-HJ-Z])\s+([a-zA-Z])", r"\1\2", text)
          
     text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
@@ -103,7 +103,7 @@ def _looks_like_header_line(text: str) -> bool:
         r"(?i)^page\s+\d+",
         r"^\d+\s*(of|/)\s*\d+$",
         r"(?i)copyright",
-        r"^[A-Z]{3,4}\s+-\s+[A-Z]", # Event codes (ASM - Automotive...)
+        r"^[A-Z]{3,4}\s+-\s+[A-Z]", 
     ]
     if any(re.search(p, text) for p in patterns):
         return True
@@ -133,19 +133,19 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 
                 line = re.sub(r"\s{2,}", " ", line)
 
-                # Fix for ICDC footer merging into last question (Generic Event Code)
-                # Matches " ASM - Automotive", " BSM - Business", " BLTDM – Business"
-                # Handle 3-5 letters (e.g. BLTDM) and various dashes (- – —)
-                # Allow match at start of line (^ or \s+)
+                
+                
+                
+                
                 footer_regex = re.compile(r"(?:^|\s+)\b([A-Z]{3,5}\s*[-–—]\s*[A-Z])")
                 footer_match = footer_regex.search(line)
                 if footer_match:
                      line = line[:footer_match.start()].strip()
-                     # Clean up trailing cluster leftovers (e.g. "Business Management and")
+                     
                      line = re.sub(r"\s+(and|Cluster)$", "", line).strip()
                      line = re.sub(r"\s+(Business Management|Hospitality|Finance|Marketing|Entrepreneurship|Administration)\s*$", "", line).strip()
                 
-                # Additional cleanups for ICDC footer remnants
+                
                 if "specialist levels." in line:
                     line = line.replace("specialist levels.", "").strip()
                 if "Center®, Columbus, Ohio" in line:
@@ -246,11 +246,11 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         line = lines[i]
         i += 1
         
-        # Check answer key start
+        
         if line.lower().strip() == "answer key":
              break
 
-        # Check for Question start
+        
         q_match = q_start_re.match(line)
         if q_match:
             num = int(q_match.group(1))
@@ -266,27 +266,27 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             }
             continue
 
-        # Check for Option start
+        
         opt_match = opt_start_re.match(line)
         if opt_match:
             label = opt_match.group(1).upper()
             text = opt_match.group(2)
             
-            # Handle orphan label "A." with text on next line
+            
             if not text.strip() and i < len(lines):
-                 # Peek next line
+                 
                  next_line = lines[i]
-                 # Ensure next line isn't another option or question
+                 
                  if not opt_start_re.match(next_line) and not q_start_re.match(next_line):
                       text = next_line
                       i += 1
             
-            # Detect implicit new question (e.g. merged Q84/Q85)
-            # If we see "A" and we already have options (specifically an A), split.
+            
+            
             if current_q and label == "A" and any(o["label"] == "A" for o in current_q["options"]):
                 prev_num = current_q["number"]
                 finalize_current()
-                # Create implied question
+                
                 current_q = {
                     "number": prev_num + 1,
                     "prompt": "[Prompt text missing from PDF]",
@@ -294,8 +294,8 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                 }
             
             if not current_q:
-                # Special case: Q1 prompt missing (e.g. ENTRE_T_B25.pdf)
-                # If we see "A" and have parsed 0 questions so far, assume this is Q1.
+                
+                
                 if label == "A" and not questions:
                     current_q = {
                         "number": 1,
@@ -303,16 +303,16 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                         "options": []
                     }
                 else:
-                    # Orbiting option with no question and not Q1? Skip.
+                    
                     continue
 
             current_q["options"].append({"label": label, "text": text})
             
-            # Check for inline options (e.g. "A. Apple B. Banana")
+            
             split_iter = list(inline_opt_re.finditer(text))
             if split_iter:
                 full_text = text
-                # Normalize splitting
+                
                 parts = re.split(inline_opt_re, full_text)
                 current_q["options"][-1]["text"] = parts[0]
                 
@@ -350,23 +350,23 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         num = q["number"]
         if num in seen_ids: continue
         
-        # Sort options by label to detect gaps
+        
         q["options"].sort(key=lambda x: x["label"])
         
-        # Fill missing options (e.g. if C is missing in A,B,D)
+        
         labels = [o["label"] for o in q["options"]]
         if labels:
-            # We expect A, B, C, D...
+            
             expected_labels = ['A','B','C','D','E']
-            # Determine range
+            
             max_idx = -1
             for l in labels:
                 if l in expected_labels:
                     max_idx = max(max_idx, expected_labels.index(l))
             
-            # If we have D (index 3), we need A,B,C.
-            # If we only have A (index 0), max_idx=0.
-            # We want at least 4 options if possible, or up to max_label
+            
+            
+            
             target_count = max(4, max_idx + 1)
             
             new_options = []
@@ -377,12 +377,12 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                     new_options.append(q["options"][current_src_idx])
                     current_src_idx += 1
                 else:
-                    # Missing
+                    
                     new_options.append({"label": exp_label, "text": "[Option missing from PDF]"})
             
             q["options"] = new_options
         else:
-            # No options? Add placeholders
+            
             q["options"] = [{"label": l, "text": "[Option missing]"} for l in "ABCD"]
         
         ans_data = answers.get(num)
@@ -437,7 +437,7 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
             "question_count": len(questions)
         }
     except Exception as e:
-        # Enhanced error logging for better debugging
+        
         app.logger.error(f"PDF parsing error for '{name_hint}': {e}", exc_info=True)
         print(f"⚠️  Parsing error for '{name_hint}': {e}")
         return {}
@@ -512,12 +512,12 @@ _STATIC_TESTS_CACHE = {}
 
 @app.route("/")
 def home():
-    # Opportunistic cleanup - reduced frequency to improve performance
-    if random.random() < 0.05:  # Run 5% of the time on home load
+    
+    if random.random() < 0.05:  
         _cleanup_old_sessions()
         
     sid = _get_session_id()
-    # Ensure session exists
+    
     _load_session_data(sid)
     return render_template("index.html", default_random_order=DEFAULT_RANDOM_ORDER)
 

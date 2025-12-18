@@ -1,8 +1,8 @@
-/* Modern Typography & Variables */
+
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 :root {
-  /* Core Palette - Modern & Vibrant */
+  
   --bg: #0f111a;
   --bg-gradient: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15), transparent 40%),
     radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.1), transparent 40%);
@@ -166,7 +166,7 @@ body {
   scroll-behavior: smooth;
 }
 
-/* Background Grid Effect */
+
 .bg-grid {
   position: fixed;
   inset: 0;
@@ -188,7 +188,7 @@ body {
 
 
 
-/* Typography & Base Components */
+
 h1,
 h2,
 h3,
@@ -210,7 +210,7 @@ h1 {
 
 }
 
-/* Performance Mode Overrides */
+
 html.perf-mode {
   --transition: none !important;
 }
@@ -241,7 +241,7 @@ html.perf-mode .logo-area .symbol {
   box-shadow: none;
 }
 
-/* Flatten hover/scale effects in performance mode */
+
 html.perf-mode .option-btn,
 html.perf-mode .btn-icon,
 html.perf-mode .btn-nav,
@@ -305,7 +305,7 @@ a:hover {
   color: var(--text-muted);
 }
 
-/* Layout Structure */
+
 body {
   padding: clamp(16px, 4vw, 40px);
 }
@@ -330,7 +330,7 @@ body {
   }
 }
 
-/* ... */
+
 
 .layout {
   position: relative;
@@ -339,7 +339,7 @@ body {
   margin: 0;
   display: grid;
   gap: 24px;
-  /* Sidebar: Min 280px, Max 400px, otherwise proportional */
+  
   grid-template-columns: minmax(280px, 25%) 1fr;
 }
 
@@ -398,7 +398,7 @@ body {
   }
 }
 
-/* Glass Panels */
+
 .panel,
 .card {
   background: var(--card-bg);
@@ -429,13 +429,13 @@ body {
   z-index: 1;
 }
 
-/* Sidebar & Test Selection */
+
 .test-panel {
   display: flex;
   flex-direction: column;
   gap: 20px;
   max-height: calc(100vh - 100px);
-  /* adjusted for topbar */
+  
   position: sticky;
   top: 20px;
 }
@@ -522,7 +522,7 @@ select:focus {
   font-size: 0.85rem;
 }
 
-/* Standalone time-select styling (when not in .time-input-row) */
+
 .time-select {
   width: 90px;
   padding: 8px 12px;
@@ -589,7 +589,7 @@ select:focus {
   box-shadow: 0 0 0 3px var(--primary-glow);
 }
 
-/* Remove spinners from number inputs */
+
 .time-select::-webkit-inner-spin-button,
 .time-select::-webkit-outer-spin-button,
 .time-input-row .time-select::-webkit-inner-spin-button,
@@ -622,7 +622,7 @@ select:focus {
   font-size: 1.2em;
 }
 
-/* Main Question Area */
+
 .play-panel {
   display: flex;
   flex-direction: column;
@@ -670,7 +670,7 @@ select:focus {
   border-radius: 4px;
 }
 
-/* Progress Bar */
+
 .progress-shell {
   height: 6px;
   background: rgba(255, 255, 255, 0.1);
@@ -686,7 +686,7 @@ select:focus {
   box-shadow: 0 0 12px var(--primary-glow);
 }
 
-/* Question Grid Drawer */
+
 .question-grid-wrapper {
   background: rgba(0, 0, 0, 0.2);
   border-radius: var(--radius-md);
@@ -756,7 +756,7 @@ select:focus {
   color: var(--text-main);
 }
 
-/* Question Card */
+
 .question-text {
   font-size: 1.4rem;
   font-weight: 600;
@@ -830,7 +830,7 @@ select:focus {
   color: var(--text-main);
 }
 
-/* Ensure click on toggle doesn't look like button active state */
+
 .strike-toggle:active {
   transform: translateY(-50%) scale(0.95);
 }
@@ -838,7 +838,7 @@ select:focus {
 .option-btn.selected {
   border-color: var(--primary);
   background: var(--primary-glow);
-  /* Use existing RGBA variable */
+  
   box-shadow: 0 0 0 2px var(--primary-glow);
 }
 
@@ -864,7 +864,7 @@ select:focus {
   transform: none;
 }
 
-/* Buttons & Actions */
+
 .actions {
   margin-top: 40px;
   display: flex;
@@ -896,7 +896,7 @@ button,
   filter: drop-shadow(0 0 8px var(--primary-glow));
 }
 
-/* Button variants */
+
 .primary {
   background: linear-gradient(135deg, var(--primary), var(--accent));
   color: #fff;
@@ -961,18 +961,18 @@ button,
   font-size: 1.4em;
 }
 
-/* Navigation Buttons (Polished) */
+
 .btn-nav {
   display: inline-flex;
   align-items: center;
   gap: 8px;
   padding: 10px 20px;
   background: rgba(255, 255, 255, 0.08);
-  /* More visible than ghost */
+  
   color: var(--text-main);
   border: 1px solid var(--card-border);
   border-radius: 999px;
-  /* Pill shape */
+  
   font-weight: 600;
   font-size: 0.9rem;
   text-decoration: none;
@@ -990,7 +990,7 @@ button,
   font-size: 1.2em;
 }
 
-/* Feedback & Explanation */
+
 .feedback {
   font-weight: 700;
   margin-top: 16px;
@@ -1015,7 +1015,7 @@ button,
   line-height: 1.7;
 }
 
-/* Empty State */
+
 .placeholder {
   padding: 80px 20px;
   text-align: center;
@@ -1111,7 +1111,7 @@ button,
   color: var(--danger);
 }
 
-/* Summary Area */
+
 .summary-header {
   display: flex;
   justify-content: space-between;
@@ -1137,7 +1137,7 @@ button,
   border-radius: var(--radius-sm);
 }
 
-/* Settings Grid Overhaul */
+
 .settings-grid-layout {
   display: grid;
   grid-template-columns: 1fr;
@@ -1173,7 +1173,7 @@ button,
   margin-bottom: 2px;
 }
 
-/* Settings Overlay */
+
 .settings-overlay {
   position: fixed;
   inset: 0;
@@ -1239,7 +1239,7 @@ button,
   display: none !important;
 }
 
-/* Settings Page */
+
 .settings-body {
   max-width: 800px;
   margin: 0 auto;
@@ -1296,7 +1296,7 @@ button,
   width: 100%;
   height: 100%;
   background: var(--bg);
-  /* Fallback */
+  
 }
 
 .swatch-bg {
@@ -1309,7 +1309,7 @@ button,
   border-top-left-radius: 100%;
 }
 
-/* Theme Previews */
+
 
 [data-theme-preview="light"] .swatch-accent {
   background: #f8fafc;
@@ -1435,9 +1435,9 @@ button,
   font-weight: 500;
 }
 
-/* --- NEW FEATURES --- */
 
-/* Keyboard Hints */
+
+
 .kbd-hint {
   display: inline-block;
   min-width: 20px;
@@ -1459,7 +1459,7 @@ button,
   color: var(--primary);
 }
 
-/* Visual Analytics Chart */
+
 .chart-container {
   margin: 32px 0;
   height: 300px;
@@ -1470,7 +1470,7 @@ button,
   border: 1px solid var(--card-border);
 }
 
-/* Summary Badges */
+
 .summary-badge {
   padding: 4px 12px;
   border-radius: 99px;
@@ -1504,7 +1504,7 @@ button,
   box-shadow: 0 0 15px rgba(234, 179, 8, 0.2);
 }
 
-/* Animation Utilities */
+
 @keyframes shake {
 
   0%,
@@ -1529,7 +1529,7 @@ button,
   animation: shake 0.4s cubic-bezier(.36, .07, .19, .97) both;
 }
 
-/* --- SUMMARY AREA --- */
+
 .summary-container {
   text-align: center;
   padding: 40px 20px;
@@ -1622,7 +1622,7 @@ button,
   height: 300px;
 }
 
-/* Unlock Overlay */
+
 .unlock-overlay {
   position: fixed;
   top: 0;

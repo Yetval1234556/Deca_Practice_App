@@ -9,7 +9,7 @@
     try {
       localStorage.setItem(KEY, theme);
     } catch (err) {
-      // ignore storage errors
+      
     }
     return theme;
   }
@@ -36,7 +36,7 @@
 
   initTheme();
 
-  // Performance Mode Init
+  
   (function () {
     try {
       const perf = localStorage.getItem("deca-perf-mode") === "true";
