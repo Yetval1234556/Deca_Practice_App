@@ -1827,6 +1827,110 @@ function setupToggle(id, key, defaultVal, onChange) {
 
 
 
+async function startSmartReview() {
+    if (!state.tests.length && !localTests.size) await fetchTests();
+    const missed = MissedMgr.getAll();
+    if (!missed.length) {
+        alert("No missed questions found!");
+        renderTestList();
+        return;
+    }
+
+    testListEl.innerHTML = '<p class="muted">Generating review session...</p>';
+
+    const byTest = {};
+    missed.forEach(item => {
+        if (!byTest[item.t]) byTest[item.t] = [];
+        byTest[item.t].push(item.q);
+    });
+
+    const combinedQuestions = [];
+
+    for (const testId of Object.keys(byTest)) {
+        const targetIds = new Set(byTest[testId]);
+
+        try {
+            const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                body: JSON.stringify({ count: 9999, mode: "regular" }),
+            });
+
+            if (res.ok) {
+                const data = await res.json();
+                if (data.questions && Array.isArray(data.questions)) {
+                    data.questions.forEach(q => {
+                        if (targetIds.has(q.id)) {
+                            q._originalTestName = data.name || data.test?.name;
+                            combinedQuestions.push(q);
+                        }
+                    });
+                }
+            } else {
+                const cached = localTests.get(testId);
+                if (cached && cached.questions && Array.isArray(cached.questions)) {
+                    cached.questions.forEach(q => {
+                        if (targetIds.has(q.id)) {
+                            q._originalTestName = cached.name;
+                            combinedQuestions.push(q);
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            console.warn(`Failed to load test ${testId}`, e);
+            const cached = localTests.get(testId);
+            if (cached && cached.questions && Array.isArray(cached.questions)) {
+                cached.questions.forEach(q => {
+                    if (targetIds.has(q.id)) {
+                        q._originalTestName = cached.name;
+                        combinedQuestions.push(q);
+                    }
+                });
+            }
+        }
+    }
+
+    if (!combinedQuestions.length) {
+        alert("Could not load any missed questions.");
+        renderTestList();
+        return;
+    }
+
+    state.activeTest = {
+        id: "smart-review",
+        name: "Weakness Review",
+        description: `Reviewing ${combinedQuestions.length} missed questions.`
+    };
+    state.mode = "review_incorrect";
+    state.questions = shuffleQuestions(combinedQuestions);
+    state.currentIndex = 0;
+    state.score = 0;
+    state.answers = {};
+    state.strikes = {};
+    state.currentSelection = null;
+    state.timeLimitMs = 0;
+    state.timeRemainingMs = 0;
+    state.sessionStart = Date.now();
+    state.questionStart = Date.now();
+    state.sessionComplete = false;
+    state.endedByTimer = false;
+    state.resultsPersisted = false;
+    state.timerHidden = false;
+
+    activeTestName.textContent = state.activeTest.name;
+    questionArea.classList.remove("hidden");
+    summaryArea.classList.add("hidden");
+    testListEl.innerHTML = "";
+
+    startSessionTimer();
+    renderQuestionCard();
+    updateScore();
+    updateProgress();
+    updateSessionMeta();
+}
+
 document.addEventListener("DOMContentLoaded", () => {
 
 
@@ -1923,107 +2027,5 @@ document.addEventListener("DOMContentLoaded", () => {
 
 
 
-    async function startSmartReview() {
-        if (!state.tests.length && !localTests.size) await fetchTests();
-        const missed = MissedMgr.getAll();
-        if (!missed.length) {
-            alert("No missed questions found!");
-            renderTestList();
-            return;
-        }
 
-        testListEl.innerHTML = '<p class="muted">Generating review session...</p>';
-
-        const byTest = {};
-        missed.forEach(item => {
-            if (!byTest[item.t]) byTest[item.t] = [];
-            byTest[item.t].push(item.q);
-        });
-
-        const combinedQuestions = [];
-
-        for (const testId of Object.keys(byTest)) {
-            const targetIds = new Set(byTest[testId]);
-
-            try {
-                const res = await fetch(`/api/tests/${encodeURIComponent(testId)}/start_quiz`, {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    credentials: "same-origin",
-                    body: JSON.stringify({ count: 9999, mode: "regular" }),
-                });
-
-                if (res.ok) {
-                    const data = await res.json();
-                    if (data.questions && Array.isArray(data.questions)) {
-                        data.questions.forEach(q => {
-                            if (targetIds.has(q.id)) {
-                                q._originalTestName = data.name || data.test?.name;
-                                combinedQuestions.push(q);
-                            }
-                        });
-                    }
-                } else {
-                    const cached = localTests.get(testId);
-                    if (cached && cached.questions && Array.isArray(cached.questions)) {
-                        cached.questions.forEach(q => {
-                            if (targetIds.has(q.id)) {
-                                q._originalTestName = cached.name;
-                                combinedQuestions.push(q);
-                            }
-                        });
-                    }
-                }
-            } catch (e) {
-                console.warn(`Failed to load test ${testId}`, e);
-                const cached = localTests.get(testId);
-                if (cached && cached.questions && Array.isArray(cached.questions)) {
-                    cached.questions.forEach(q => {
-                        if (targetIds.has(q.id)) {
-                            q._originalTestName = cached.name;
-                            combinedQuestions.push(q);
-                        }
-                    });
-                }
-            }
-        }
-
-        if (!combinedQuestions.length) {
-            alert("Could not load any missed questions.");
-            renderTestList();
-            return;
-        }
-
-        state.activeTest = {
-            id: "smart-review",
-            name: "Weakness Review",
-            description: `Reviewing ${combinedQuestions.length} missed questions.`
-        };
-        state.mode = "review_incorrect";
-        state.questions = shuffleQuestions(combinedQuestions);
-        state.currentIndex = 0;
-        state.score = 0;
-        state.answers = {};
-        state.strikes = {};
-        state.currentSelection = null;
-        state.timeLimitMs = 0;
-        state.timeRemainingMs = 0;
-        state.sessionStart = Date.now();
-        state.questionStart = Date.now();
-        state.sessionComplete = false;
-        state.endedByTimer = false;
-        state.resultsPersisted = false;
-        state.timerHidden = false;
-
-        activeTestName.textContent = state.activeTest.name;
-        questionArea.classList.remove("hidden");
-        summaryArea.classList.add("hidden");
-        testListEl.innerHTML = "";
-
-        startSessionTimer();
-        renderQuestionCard();
-        updateScore();
-        updateProgress();
-        updateSessionMeta();
-    }
 });
