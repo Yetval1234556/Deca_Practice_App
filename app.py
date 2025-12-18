@@ -7,6 +7,7 @@ import tempfile
 import uuid
 import shutil
 import time
+import sqlite3
 from pathlib import Path
 from typing import Dict, List, Any, Optional, IO
 
@@ -39,14 +40,25 @@ MAX_UPLOAD_BYTES = int(os.getenv("MAX_UPLOAD_BYTES", "12582912"))
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
     if os.getenv("ENVIRONMENT") == "production":
-         
-         import secrets
-         SECRET_KEY = secrets.token_hex(32)
-         print("⚠️  WARNING: SECRET_KEY not set in production. Generated temporary key.")
+        import secrets
+        SECRET_KEY = secrets.token_hex(32)
+        print("⚠️  WARNING: SECRET_KEY not set in production. Generated temporary key.")
     else:
         SECRET_KEY = "dev-secret-key"
         print("⚠️  WARNING: Using default SECRET_KEY in development")
-SESSION_CLEANUP_AGE_SECONDS = 86400  
+SESSION_CLEANUP_AGE_SECONDS = 86400
+
+DB_PATH = INSTANCE_DIR / "sessions.db"
+
+def _init_db():
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT, updated_at REAL)")
+            conn.commit()
+    except Exception as e:
+        print(f"⚠️  DB Init Failed: {e}")
+
+_init_db()  
 
 app = Flask(__name__, static_folder="static", template_folder="templates")
 app.secret_key = SECRET_KEY
@@ -340,9 +352,7 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                 current_q["prompt"] += " " + line
 
     finalize_current()
-    
-    finalize_current()
-    
+
     final_questions = []
     seen_ids = set()
     
@@ -426,6 +436,9 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
         questions.sort(key=lambda x: x["number"])
         
         test_id = re.sub(r"[^a-z0-9]+", "-", name_hint.lower()).strip("-")
+        if not test_id:
+            test_id = f"test-{uuid.uuid4().hex[:8]}"
+            
         for q in questions:
             q["id"] = f"{test_id}-q{q['number']}"
 
@@ -447,40 +460,40 @@ def _get_session_id() -> str:
         session["sid"] = uuid.uuid4().hex
     return session["sid"]
 
-def _get_session_file_path(sid: str) -> Path:
-    return SESSION_DATA_DIR / f"{sid}.json"
+def _get_session_data_db(sid: str) -> Dict[str, Any]:
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT data FROM sessions WHERE id = ?", (sid,))
+            row = cur.fetchone()
+            if row:
+                return json.loads(row[0])
+    except Exception as e:
+        app.logger.error(f"DB Read Error: {e}")
+    return {"uploads": {}, "missed": {}}
+
+def _save_session_data_db(sid: str, data: Dict[str, Any]):
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("INSERT OR REPLACE INTO sessions (id, data, updated_at) VALUES (?, ?, ?)",
+                         (sid, json.dumps(data), time.time()))
+            conn.commit()
+    except Exception as e:
+        app.logger.error(f"DB Write Error: {e}")
 
 def _load_session_data(sid: str) -> Dict[str, Any]:
-    path = _get_session_file_path(sid)
-    if not path.exists():
-        return {"uploads": {}, "missed": {}}
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"uploads": {}, "missed": {}}
+    return _get_session_data_db(sid)
 
 def _save_session_data(sid: str, data: Dict[str, Any]):
-    path = _get_session_file_path(sid)
-    try:
-        with open(path, "w") as f:
-            json.dump(data, f)
-    except Exception as e:
-        print(f"Failed to save session: {e}")
+    _save_session_data_db(sid, data)
 
 def _cleanup_old_sessions():
-    """Removes session files older than SESSION_CLEANUP_AGE_SECONDS."""
+    """Removes sessions older than SESSION_CLEANUP_AGE_SECONDS."""
     try:
-        now = time.time()
-        for p in SESSION_DATA_DIR.glob("*.json"):
-            if not p.is_file():
-                continue
-            age = now - p.stat().st_mtime
-            if age > SESSION_CLEANUP_AGE_SECONDS:
-                try:
-                    p.unlink()
-                except Exception as e:
-                    print(f"Failed to delete old session {p.name}: {e}")
+        limit_time = time.time() - SESSION_CLEANUP_AGE_SECONDS
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute("DELETE FROM sessions WHERE updated_at < ?", (limit_time,))
+            conn.commit()
     except Exception as e:
         print(f"Cleanup error: {e}")
 
@@ -505,7 +518,8 @@ def _get_all_tests_for_session() -> Dict[str, Any]:
 def tests_dir_iter():
     try:
         return TESTS_DIR.glob("*.pdf")
-    except:
+    except Exception as e:
+        app.logger.warning(f"Failed to list tests directory: {e}")
         return []
 
 _STATIC_TESTS_CACHE = {}
@@ -584,12 +598,22 @@ def start_quiz(test_id):
         limit = int(payload.get("time_limit_seconds", 0))
         if limit > MAX_TIME_LIMIT_MINUTES * 60:
             limit = MAX_TIME_LIMIT_MINUTES * 60
-    except:
+    except (ValueError, TypeError):
         limit = 0
         
+
+    # Sanitize questions to remove answers
+    sanitized_questions = []
+    for q in questions:
+        q_copy = q.copy()
+        q_copy.pop("correct_index", None)
+        q_copy.pop("correct_letter", None)
+        q_copy.pop("explanation", None)
+        sanitized_questions.append(q_copy)
+
     return jsonify({
         "test": {"id": test["id"], "name": test["name"], "total": len(test["questions"])},
-        "questions": questions,
+        "questions": sanitized_questions,
         "selected_count": len(questions),
         "mode": mode,
         "time_limit_seconds": limit
@@ -637,6 +661,7 @@ def check_answer(test_id, question_id):
     q = next((x for x in test["questions"] if x["id"] == question_id), None)
     if not q: abort(404, "Question not found")
     
+    if not request.json: abort(400, "JSON body required")
     choice = request.json.get("choice")
     if choice is None: abort(400, "Choice required")
     
@@ -651,7 +676,7 @@ def store_results(test_id):
     
     missed_ids = []
     for r in results:
-        if r.get("correct") is False:
+        if r and r.get("correct") is False:
             missed_ids.append(r.get("question_id"))
             
     data = _load_session_data(sid)
