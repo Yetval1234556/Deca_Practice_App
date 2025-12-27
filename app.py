@@ -103,8 +103,13 @@ def _strip_leading_number(text: str) -> str:
 @app.before_request
 def track_active_user():
     try:
-        if request.remote_addr:
-            ip = request.remote_addr
+        # Support for proxies (Koyeb/Heroku/etc)
+        # request.access_route[0] or X-Forwarded-For usually contains the real IP
+        ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+        if ip and "," in ip:
+            ip = ip.split(",")[0].strip()
+            
+        if ip:
             ua = request.headers.get("User-Agent", "Unknown")
             now = time.time()
             with sqlite3.connect(DB_PATH) as conn:
