@@ -55,6 +55,7 @@ def _init_db():
     try:
         with sqlite3.connect(DB_PATH) as conn:
             conn.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT, updated_at REAL)")
+            conn.execute("CREATE TABLE IF NOT EXISTS active_users (ip TEXT PRIMARY KEY, ua TEXT, last_seen REAL)")
             conn.commit()
         print(f"✅ Database initialized at {DB_PATH}")
     except Exception as e:
@@ -98,6 +99,20 @@ def _normalize_whitespace(text: str) -> str:
 
 def _strip_leading_number(text: str) -> str:
     return re.sub(r"^\s*(?:\d{1,3}[).:\-]|[A-E][).:\-])\s*", "", text).strip()
+
+@app.before_request
+def track_active_user():
+    try:
+        if request.remote_addr:
+            ip = request.remote_addr
+            ua = request.headers.get("User-Agent", "Unknown")
+            now = time.time()
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("INSERT OR REPLACE INTO active_users (ip, ua, last_seen) VALUES (?, ?, ?)",
+                             (ip, ua, now))
+                conn.commit()
+    except Exception:
+        pass  # Don't fail request if tracking fails
 
 @app.errorhandler(HTTPException)
 def _json_http_error(exc: HTTPException):
