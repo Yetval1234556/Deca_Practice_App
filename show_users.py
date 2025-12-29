@@ -2,6 +2,7 @@ import sqlite3
 import time
 import os
 import sys
+import requests
 from pathlib import Path
 from datetime import datetime
 
@@ -29,6 +30,38 @@ def get_os_browser(ua):
     
     return f"{os_name} / {browser_name}"
 
+def is_bot(ua):
+    """Check if User-Agent looks like a bot."""
+    if not ua: return False
+    ua = ua.lower()
+    bot_keywords = [
+        "bot", "crawl", "spider", "slurp", "facebook", "google", 
+        "bing", "yahoo", "yandex", "baidu", "duckduck", "curl", 
+        "python", "wget", "http-client"
+    ]
+    return any(keyword in ua for keyword in bot_keywords)
+
+def get_location(ip):
+    """Get location from IP using free API."""
+    if ip in ("127.0.0.1", "localhost", "::1"):
+        return "Localhost"
+    if ip.startswith("10.") or ip.startswith("192.168."):
+        return "Internal Network"
+        
+    try:
+        # Using ip-api.com (free, no key, 45 requests/min limit)
+        response = requests.get(f"http://ip-api.com/json/{ip}", timeout=2)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("status") == "success":
+                city = data.get("city", "Unknown City")
+                region = data.get("regionName", "")
+                country = data.get("country", "Unknown Country")
+                return f"{city}, {region} ({country})"
+    except Exception:
+        pass
+    return "Unknown Location"
+
 def show_active_users():
     if not DB_PATH.exists():
         print(f"❌ Database not found at {DB_PATH}")
@@ -46,17 +79,29 @@ def show_active_users():
         cur.execute("SELECT ip, ua, last_seen FROM active_users ORDER BY last_seen DESC")
         rows = cur.fetchall()
         
-        print(f"\n👥 Active Users (Last 24 Hours): {len(rows)}")
+        # Filter bots and process data
+        humans = []
+        for ip, ua, last_seen in rows:
+            if not is_bot(ua):
+                humans.append((ip, ua, last_seen))
+        
+        print(f"\n👥 Active Users (Last 24 Hours): {len(humans)} (Bots Hidden)")
         print("-" * 80)
-        print(f"{'IP Address':<15} | {'Last Seen':<20} | {'OS / Browser'}")
+        print(f"{'Location':<35} | {'Last Seen':<10} | {'OS / Browser'}")
         print("-" * 80)
         
-        for ip, ua, last_seen in rows:
+        for ip, ua, last_seen in humans:
             time_str = datetime.fromtimestamp(last_seen).strftime('%H:%M:%S')
             os_browser = get_os_browser(ua)
-            print(f"{ip:<15} | {time_str:<20} | {os_browser}")
-            print(f"   └─ UA: {ua[:60]}...") # Truncate UA for display
+            location = get_location(ip)
+            
+            print(f"{location:<35} | {time_str:<10} | {os_browser}")
+            # Truncate UA for display, kept for debug if needed but not prominent
+            # print(f"   └─ UA: {ua[:60]}...") 
             print("-" * 80)
+            
+        if len(rows) - len(humans) > 0:
+            print(f"\nℹ️  Filtered {len(rows) - len(humans)} bot(s).")
             
         conn.close()
     except Exception as e:
