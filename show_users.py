@@ -41,12 +41,12 @@ def is_bot(ua):
     ]
     return any(keyword in ua for keyword in bot_keywords)
 
-def get_location(ip):
-    """Get location from IP using free API."""
+def get_location_data(ip):
+    """Get rich location data from IP including ISP."""
     if ip in ("127.0.0.1", "localhost", "::1"):
-        return "Localhost"
+        return {"location": "Localhost", "isp": "Loopback"}
     if ip.startswith("10.") or ip.startswith("192.168."):
-        return "Internal Network"
+        return {"location": "Internal Network", "isp": "Private"}
         
     try:
         # Using ip-api.com (free, no key, 45 requests/min limit)
@@ -57,10 +57,29 @@ def get_location(ip):
                 city = data.get("city", "Unknown City")
                 region = data.get("regionName", "")
                 country = data.get("country", "Unknown Country")
-                return f"{city}, {region} ({country})"
+                isp = data.get("isp", "") + " " + data.get("org", "")
+                return {
+                    "location": f"{city}, {region} ({country})",
+                    "isp": isp
+                }
     except Exception:
         pass
-    return "Unknown Location"
+    return {"location": "Unknown Location", "isp": "Unknown ISP"}
+
+def is_hosting_provider(isp_str):
+    """Check if ISP indicates a hosting provider/data center."""
+    if not isp_str: return False
+    isp_str = isp_str.lower()
+    
+    # Common cloud/hosting providers that suggest non-human traffic
+    hosting_keywords = [
+        "google", "amazon", "aws", "microsoft", "azure", 
+        "digitalocean", "hetzner", "alibaba", "tencent", "oracle", 
+        "linode", "ovh", "vultr", "choopa", "leaseweb", "datacenter", 
+        "hosting", "cloud", "server", "colocation", "m247", "fly.io"
+    ]
+    
+    return any(keyword in isp_str for keyword in hosting_keywords)
 
 def show_active_users():
     if not DB_PATH.exists():
@@ -81,27 +100,45 @@ def show_active_users():
         
         # Filter bots and process data
         humans = []
+        bots_count = 0
+        hosting_count = 0
+        
+        print("🔍 Analyzing traffic sources...")
+        
         for ip, ua, last_seen in rows:
-            if not is_bot(ua):
-                humans.append((ip, ua, last_seen))
+            if is_bot(ua):
+                bots_count += 1
+                continue
+                
+            loc_data = get_location_data(ip)
+            isp = loc_data.get("isp", "")
+            
+            if is_hosting_provider(isp):
+                # Detected as Data Center/Cloud traffic
+                hosting_count += 1
+                continue
+                
+            humans.append((ip, ua, last_seen, loc_data))
         
-        print(f"\n👥 Active Users (Last 24 Hours): {len(humans)} (Bots Hidden)")
-        print("-" * 80)
-        print(f"{'Location':<35} | {'Last Seen':<10} | {'OS / Browser'}")
-        print("-" * 80)
+        print(f"\n👥 Real Users (Last 24 Hours): {len(humans)}")
+        print(f"   (Filtered: {bots_count} Bots, {hosting_count} Data Center/VPN IPs)")
+        print("-" * 135)
+        print(f"{'Location':<35} | {'ISP':<30} | {'Last Seen (Date/Time)':<25} | {'OS / Browser'}")
+        print("-" * 135)
         
-        for ip, ua, last_seen in humans:
-            time_str = datetime.fromtimestamp(last_seen).strftime('%H:%M:%S')
+        for ip, ua, last_seen, loc_data in humans:
+            # Format: YYYY-MM-DD HH:MM:SS
+            time_str = datetime.fromtimestamp(last_seen).strftime('%Y-%m-%d %H:%M:%S')
             os_browser = get_os_browser(ua)
-            location = get_location(ip)
+            location = loc_data["location"]
+            isp = loc_data.get("isp", "Unknown")
             
-            print(f"{location:<35} | {time_str:<10} | {os_browser}")
-            # Truncate UA for display, kept for debug if needed but not prominent
-            # print(f"   └─ UA: {ua[:60]}...") 
-            print("-" * 80)
+            # Truncate ISP if too long
+            if len(isp) > 28:
+                isp = isp[:25] + "..."
             
-        if len(rows) - len(humans) > 0:
-            print(f"\nℹ️  Filtered {len(rows) - len(humans)} bot(s).")
+            print(f"{location:<35} | {isp:<30} | {time_str:<25} | {os_browser}")
+            print("-" * 135)
             
         conn.close()
     except Exception as e:
