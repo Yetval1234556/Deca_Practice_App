@@ -1,8 +1,7 @@
-
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 :root {
-  
+
   --bg: #0f111a;
   --bg-gradient: radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15), transparent 40%),
     radial-gradient(circle at 90% 80%, rgba(16, 185, 129, 0.1), transparent 40%);
@@ -339,7 +338,7 @@ body {
   margin: 0;
   display: grid;
   gap: 24px;
-  
+
   grid-template-columns: minmax(280px, 25%) 1fr;
 }
 
@@ -435,7 +434,7 @@ body {
   flex-direction: column;
   gap: 20px;
   max-height: calc(100vh - 100px);
-  
+
   position: sticky;
   top: 20px;
 }
@@ -490,6 +489,13 @@ body {
 
 .test-meta p {
   font-size: 0.85rem;
+}
+
+.small-label {
+  font-size: 0.75rem;
+  display: block;
+  margin-bottom: 4px;
+  font-weight: 500;
   color: var(--text-muted);
 }
 
@@ -837,9 +843,18 @@ select:focus {
 
 .option-btn.selected {
   border-color: var(--primary);
-  background: var(--primary-glow);
-  
-  box-shadow: 0 0 0 2px var(--primary-glow);
+  border-width: 3px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.25), rgba(139, 92, 246, 0.15));
+  box-shadow: 0 0 0 4px var(--primary-glow), 0 4px 20px var(--primary-glow);
+  transform: translateX(8px) scale(1.02);
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.option-btn.selected .kbd-hint {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
 }
 
 .option-btn.correct-highlight {
@@ -968,11 +983,11 @@ button,
   gap: 8px;
   padding: 10px 20px;
   background: rgba(255, 255, 255, 0.08);
-  
+
   color: var(--text-main);
   border: 1px solid var(--card-border);
   border-radius: 999px;
-  
+
   font-weight: 600;
   font-size: 0.9rem;
   text-decoration: none;
@@ -1233,6 +1248,19 @@ button,
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.session-footer__title {
+  font-weight: 600;
+  color: var(--primary);
+}
+
+.session-footer__meta,
+.session-footer__progress {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .hidden {
@@ -1296,7 +1324,7 @@ button,
   width: 100%;
   height: 100%;
   background: var(--bg);
-  
+
 }
 
 .swatch-bg {
@@ -1430,6 +1458,10 @@ button,
   transform: translateX(24px);
 }
 
+[data-theme="light"] .slider {
+  background: rgba(0, 0, 0, 0.15);
+}
+
 .toggle-label {
   margin-left: 8px;
   font-weight: 500;
@@ -1557,38 +1589,7 @@ button,
   letter-spacing: -2px;
 }
 
-.summary-badge {
-  display: inline-block;
-  padding: 6px 16px;
-  border-radius: 50px;
-  font-size: 0.9rem;
-  font-weight: 600;
-  margin-bottom: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-}
 
-.badge-gold {
-  background: linear-gradient(135deg, #fbbf24, #d97706);
-  color: #fff;
-}
-
-.badge-silver {
-  background: linear-gradient(135deg, #e5e7eb, #9ca3af);
-  color: #1f2937;
-}
-
-.badge-bronze {
-  background: linear-gradient(135deg, #fdba74, #ea580c);
-  color: #fff;
-}
-
-.badge-neutral {
-  background: var(--card-bg);
-  border: 1px solid var(--card-border);
-  color: var(--text-muted);
-}
 
 .summary-stats-grid {
   display: grid;
@@ -1697,6 +1698,7 @@ button,
     opacity: 1;
   }
 }
+
 /* Animation Additions */
 
 @keyframes fadeInScale {
@@ -1704,6 +1706,7 @@ button,
     opacity: 0;
     transform: scale(0.98) translateY(4px);
   }
+
   to {
     opacity: 1;
     transform: scale(1) translateY(0);
@@ -1711,7 +1714,7 @@ button,
 }
 
 .question-card-area {
-   transition: height 0.3s ease;
+  transition: height 0.3s ease;
 }
 
 .question-head {
@@ -1729,11 +1732,25 @@ button,
   animation: fadeInScale 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
 }
 
-.options .option-btn:nth-child(1) { animation-delay: 0.05s; }
-.options .option-btn:nth-child(2) { animation-delay: 0.1s; }
-.options .option-btn:nth-child(3) { animation-delay: 0.15s; }
-.options .option-btn:nth-child(4) { animation-delay: 0.2s; }
-.options .option-btn:nth-child(5) { animation-delay: 0.25s; }
+.options .option-btn:nth-child(1) {
+  animation-delay: 0.05s;
+}
+
+.options .option-btn:nth-child(2) {
+  animation-delay: 0.1s;
+}
+
+.options .option-btn:nth-child(3) {
+  animation-delay: 0.15s;
+}
+
+.options .option-btn:nth-child(4) {
+  animation-delay: 0.2s;
+}
+
+.options .option-btn:nth-child(5) {
+  animation-delay: 0.25s;
+}
 
 html.perf-mode .question-head,
 html.perf-mode .options,

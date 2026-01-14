@@ -91,7 +91,8 @@ def show_active_users():
         cur = conn.cursor()
         
         # Cleanup old users first (handling it here ensures accurate read)
-        threshold = time.time() - 86400 # 24 hours
+        # UPDATED: Keep last 7 days per user request
+        threshold = time.time() - (7 * 86400) 
         cur.execute("DELETE FROM active_users WHERE last_seen < ?", (threshold,))
         conn.commit()
         
@@ -103,7 +104,11 @@ def show_active_users():
         bots_count = 0
         hosting_count = 0
         
-        print("🔍 Analyzing traffic sources...")
+        # Dictionary to track IP groups (first 3 octets)
+        # key: subnet (e.g. "192.168.1"), value: list of full IPs
+        ip_groups = {} 
+        
+        print("🔍 Analyzing traffic sources (Last 7 Days)...")
         
         for ip, ua, last_seen in rows:
             if is_bot(ua):
@@ -117,18 +122,27 @@ def show_active_users():
                 # Detected as Data Center/Cloud traffic
                 hosting_count += 1
                 continue
-                
+            
+            # Group IPs by subnet (Class C /24)
+            subnet = ".".join(ip.split(".")[:3])
+            if subnet not in ip_groups:
+                ip_groups[subnet] = []
+            if ip not in ip_groups[subnet]:
+                ip_groups[subnet].append(ip)
+
             humans.append((ip, ua, last_seen, loc_data))
-        
-        print(f"\n👥 Real Users (Last 24 Hours): {len(humans)}")
+            
+        print(f"\n👥 Real Users (Last 7 Days): {len(humans)}")
         print(f"   (Filtered: {bots_count} Bots, {hosting_count} Data Center/VPN IPs)")
-        print("-" * 135)
-        print(f"{'Location':<35} | {'ISP':<30} | {'Last Seen (Date/Time)':<25} | {'OS / Browser'}")
-        print("-" * 135)
+        print("-" * 165)
+        # Added "Shared IP" column
+        print(f"{'Location':<35} | {'ISP':<30} | {'Last Seen':<20} | {'Shared IP / Subnet':<25} | {'OS / Browser'}")
+        print("-" * 165)
         
         for ip, ua, last_seen, loc_data in humans:
             # Format: YYYY-MM-DD HH:MM:SS
-            time_str = datetime.fromtimestamp(last_seen).strftime('%Y-%m-%d %H:%M:%S')
+            # Calculate time ago roughly for "Last Seen" context if needed, but date is fine.
+            time_str = datetime.fromtimestamp(last_seen).strftime('%Y-%m-%d %H:%M')
             os_browser = get_os_browser(ua)
             location = loc_data["location"]
             isp = loc_data.get("isp", "Unknown")
@@ -137,8 +151,18 @@ def show_active_users():
             if len(isp) > 28:
                 isp = isp[:25] + "..."
             
-            print(f"{location:<35} | {isp:<30} | {time_str:<25} | {os_browser}")
-            print("-" * 135)
+            # Check for shared IPs
+            subnet = ".".join(ip.split(".")[:3])
+            shared_info = ""
+            group = ip_groups.get(subnet, [])
+            if len(group) > 1:
+                # Calculate how many OTHERS in this subnet
+                others = len(group) - 1
+                if others > 0:
+                    shared_info = f"⚠️  Matches {others} others"
+            
+            print(f"{location:<35} | {isp:<30} | {time_str:<20} | {shared_info:<25} | {os_browser}")
+            print("-" * 165)
             
         conn.close()
     except Exception as e:

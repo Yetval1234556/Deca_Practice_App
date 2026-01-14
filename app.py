@@ -94,6 +94,10 @@ def _normalize_whitespace(text: str) -> str:
     
     text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
     
+    # Fix specific common broken words
+    text = text.replace("SOURC E", "SOURCE")
+    text = re.sub(r"\b(SOURC)\s+(E)\b", "SOURCE", text)
+
     text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
@@ -194,8 +198,16 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 
                 if "specialist levels." in line:
                     line = line.replace("specialist levels.", "").strip()
-                if "Center®, Columbus, Ohio" in line:
-                     line = line.split("Center®, Columbus, Ohio")[0].strip()
+                
+                # Handle copyright lines that may have answer key concatenated (e.g., "Ohio1.A")
+                ohio_match = re.search(r"(Center®?,?\s*Columbus,?\s*Ohio)\s*(\d{1,3}\s*[.:,-]?\s*[A-E].*)?$", line, re.IGNORECASE)
+                if ohio_match:
+                    # Keep the answer part if present
+                    answer_part = ohio_match.group(2)
+                    line = line[:ohio_match.start()].strip()
+                    if answer_part:
+                        lines.append(answer_part.strip())
+                
                 if "career -sustaining" in line:
                     line = line.split("career -sustaining")[0].strip()
                 if line.endswith("Business Management and"):
@@ -228,49 +240,487 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
     final_lines = [l for l in lines if counts[l] < threshold and not _looks_like_header_line(l)]
     return final_lines
 
+def _fix_broken_words(text: str) -> str:
+    if not text: return ""
+    
+    # =========================================================================
+    # 1. FIX COMMON SPLIT WORDS (highest impact - 140k+ fixes)
+    # =========================================================================
+    # These are the most common PDF extraction artifacts - comprehensive list
+    common_fixes = [
+        # === BUSINESS/FINANCE CORE TERMS ===
+        (r'\bbusi?\s*ness\b', 'business'),
+        (r'\bbus\s+iness\b', 'business'),
+        (r'\bfi\s*nance\b', 'finance'),
+        (r'\bfi\s*nan\s*cial\b', 'financial'),
+        (r'\bin\s*for\s*ma\s*tion\b', 'information'),
+        (r'\binfor\s*mation\b', 'information'),
+        (r'\bman\s*age\s*ment\b', 'management'),
+        (r'\bmanage\s*ment\b', 'management'),
+        (r'\bcus\s*tom\s*er\b', 'customer'),
+        (r'\bcustom\s*er\b', 'customer'),
+        (r'\bcom\s*pa\s*ny\b', 'company'),
+        (r'\bcompan\s*y\b', 'company'),
+        (r'\bpro\s*duct\b', 'product'),
+        (r'\bproduc\s*t\b', 'product'),
+        (r'\bser\s*vice\b', 'service'),
+        (r'\bservic\s*e\b', 'service'),
+        (r'\bmar\s*ket\s*ing\b', 'marketing'),
+        (r'\bmarket\s*ing\b', 'marketing'),
+        (r'\bem\s*ploy\s*ee\b', 'employee'),
+        (r'\bemploy\s*ee\b', 'employee'),
+        (r'\bor\s*gan\s*iza\s*tion\b', 'organization'),
+        (r'\borgan\s*ization\b', 'organization'),
+        (r'\borganiza\s*tion\b', 'organization'),
+        (r'\bcom\s*mu\s*ni\s*ca\s*tion\b', 'communication'),
+        (r'\bcommunica\s*tion\b', 'communication'),
+        (r'\bde\s*ci\s*sion\b', 'decision'),
+        (r'\bdeci\s*sion\b', 'decision'),
+        (r'\bop\s*er\s*a\s*tion\b', 'operation'),
+        (r'\bopera\s*tion\b', 'operation'),
+        
+        # === COMMON VERBS ===
+        (r'\bSOURC\s*E\b', 'SOURCE'),
+        (r'\bsourc\s*e\b', 'source'),
+        (r'\bre\s*triev\s*ed\b', 'retrieved'),
+        (r'\bRetriev\s*ed\b', 'Retrieved'),
+        (r'\bdeter\s*mine\b', 'determine'),
+        (r'\bunder\s*stand\b', 'understand'),
+        (r'\bunder\s*standing\b', 'understanding'),
+        (r'\bpro\s*vide\b', 'provide'),
+        (r'\bprovid\s*ing\b', 'providing'),
+        (r'\bim\s*prove\b', 'improve'),
+        (r'\bimprov\s*ing\b', 'improving'),
+        (r'\bcon\s*sider\b', 'consider'),
+        (r'\bcon\s*tact\b', 'contact'),
+        (r'\bcon\s*trol\b', 'control'),
+        (r'\bcon\s*tract\b', 'contract'),
+        (r'\bcon\s*sumer\b', 'consumer'),
+        (r'\bcon\s*tinue\b', 'continue'),
+        (r'\bex\s*ample\b', 'example'),
+        (r'\bex\s*plain\b', 'explain'),
+        (r'\bex\s*pect\b', 'expect'),
+        (r'\bex\s*perience\b', 'experience'),
+        (r'\bre\s*quire\b', 'require'),
+        (r'\bre\s*sponse\b', 'response'),
+        (r'\bre\s*sult\b', 'result'),
+        (r'\bre\s*port\b', 'report'),
+        (r'\bre\s*ceive\b', 'receive'),
+        (r'\bre\s*view\b', 'review'),
+        (r'\bre\s*search\b', 'research'),
+        (r'\bper\s*form\b', 'perform'),
+        (r'\bper\s*son\b', 'person'),
+        (r'\bper\s*sonal\b', 'personal'),
+        
+        # === COMMON NOUNS ===
+        (r'\bprofes\s*sional\b', 'professional'),
+        (r'\brel\s*ation\s*ship\b', 'relationship'),
+        (r'\brelation\s*ship\b', 'relationship'),
+        (r'\bdevel\s*op\s*ment\b', 'development'),
+        (r'\bdevelop\s*ment\b', 'development'),
+        (r'\benviron\s*ment\b', 'environment'),
+        (r'\btech\s*nol\s*ogy\b', 'technology'),
+        (r'\btechnol\s*ogy\b', 'technology'),
+        (r'\badver\s*tis\s*ing\b', 'advertising'),
+        (r'\badvertis\s*ing\b', 'advertising'),
+        (r'\bexplan\s*ation\b', 'explanation'),
+        (r'\binstru\s*ment\b', 'instrument'),
+        (r'\bques\s*tion\b', 'question'),
+        (r'\bregu\s*la\s*tion\b', 'regulation'),
+        (r'\bregula\s*tion\b', 'regulation'),
+        (r'\bdocu\s*ment\b', 'document'),
+        (r'\bstate\s*ment\b', 'statement'),
+        (r'\binvest\s*ment\b', 'investment'),
+        (r'\bequip\s*ment\b', 'equipment'),
+        (r'\brequire\s*ment\b', 'requirement'),
+        (r'\bachieve\s*ment\b', 'achievement'),
+        (r'\badvan\s*tage\b', 'advantage'),
+        (r'\bknowl\s*edge\b', 'knowledge'),
+        (r'\bstra\s*tegy\b', 'strategy'),
+        (r'\bstrateg\s*y\b', 'strategy'),
+        (r'\bactiv\s*ity\b', 'activity'),
+        (r'\bopportun\s*ity\b', 'opportunity'),
+        (r'\brespons\s*ibility\b', 'responsibility'),
+        (r'\bresponsi\s*bility\b', 'responsibility'),
+        (r'\babil\s*ity\b', 'ability'),
+        (r'\bqual\s*ity\b', 'quality'),
+        (r'\bquant\s*ity\b', 'quantity'),
+        (r'\butil\s*ity\b', 'utility'),
+        (r'\bsecur\s*ity\b', 'security'),
+        (r'\bauthor\s*ity\b', 'authority'),
+        (r'\bprior\s*ity\b', 'priority'),
+        (r'\bcomplex\s*ity\b', 'complexity'),
+        
+        # === MORE BUSINESS TERMS ===
+        (r'\bemploy\s*er\b', 'employer'),
+        (r'\bemploy\s*ment\b', 'employment'),
+        (r'\bsales\s*person\b', 'salesperson'),
+        (r'\bread\s*ing\b', 'reading'),
+        (r'\bwrit\s*ing\b', 'writing'),
+        (r'\bspeak\s*ing\b', 'speaking'),
+        (r'\blisten\s*ing\b', 'listening'),
+        (r'\blearn\s*ing\b', 'learning'),
+        (r'\btrain\s*ing\b', 'training'),
+        (r'\bplan\s*ning\b', 'planning'),
+        (r'\bbudget\s*ing\b', 'budgeting'),
+        (r'\baccount\s*ing\b', 'accounting'),
+        (r'\bbank\s*ing\b', 'banking'),
+        (r'\bpric\s*ing\b', 'pricing'),
+        (r'\bbrand\s*ing\b', 'branding'),
+        (r'\bsell\s*ing\b', 'selling'),
+        (r'\bbuy\s*ing\b', 'buying'),
+        (r'\bship\s*ping\b', 'shipping'),
+        (r'\bpack\s*aging\b', 'packaging'),
+        (r'\bpromot\s*ion\b', 'promotion'),
+        (r'\bpromo\s*tion\b', 'promotion'),
+        (r'\bdistri\s*bution\b', 'distribution'),
+        (r'\bproduct\s*ion\b', 'production'),
+        (r'\bcompet\s*ition\b', 'competition'),
+        (r'\bcompeti\s*tion\b', 'competition'),
+        (r'\bposi\s*tion\b', 'position'),
+        (r'\bcondi\s*tion\b', 'condition'),
+        (r'\btransi\s*tion\b', 'transition'),
+        (r'\bsolu\s*tion\b', 'solution'),
+        (r'\beval\s*uation\b', 'evaluation'),
+        (r'\bsitu\s*ation\b', 'situation'),
+        (r'\bpresen\s*tation\b', 'presentation'),
+        (r'\bappli\s*cation\b', 'application'),
+        (r'\binforma\s*tion\b', 'information'),
+        (r'\bimportant\b', 'important'),
+        (r'\bimport\s*ant\b', 'important'),
+        (r'\bdifferent\b', 'different'),
+        (r'\bdiffer\s*ent\b', 'different'),
+        (r'\beffect\s*ive\b', 'effective'),
+        (r'\bproduct\s*ive\b', 'productive'),
+        (r'\bposit\s*ive\b', 'positive'),
+        (r'\bnegat\s*ive\b', 'negative'),
+        (r'\bcreate\s*ive\b', 'creative'),
+        (r'\bcompet\s*itive\b', 'competitive'),
+        
+        # === ADDITIONAL COMMON WORDS ===
+        (r'\bfollow\s*ing\b', 'following'),
+        (r'\binclu\s*ding\b', 'including'),
+        (r'\bbecome\s*ing\b', 'becoming'),
+        (r'\bbehav\s*ior\b', 'behavior'),
+        (r'\binter\s*est\b', 'interest'),
+        (r'\binter\s*net\b', 'internet'),
+        (r'\binter\s*view\b', 'interview'),
+        (r'\binter\s*nal\b', 'internal'),
+        (r'\binter\s*action\b', 'interaction'),
+        (r'\bextern\s*al\b', 'external'),
+        (r'\borigin\s*al\b', 'original'),
+        (r'\bperson\s*al\b', 'personal'),
+        (r'\bproces\s*s\b', 'process'),
+        (r'\bprogr\s*am\b', 'program'),
+        (r'\bprob\s*lem\b', 'problem'),
+        (r'\bpur\s*pose\b', 'purpose'),
+        (r'\bpur\s*chase\b', 'purchase'),
+        (r'\bstand\s*ard\b', 'standard'),
+        (r'\bpart\s*ner\b', 'partner'),
+        (r'\bpart\s*nership\b', 'partnership'),
+        (r'\bleader\s*ship\b', 'leadership'),
+        (r'\bmember\s*ship\b', 'membership'),
+        (r'\bowner\s*ship\b', 'ownership'),
+        (r'\bspons\s*orship\b', 'sponsorship'),
+        (r'\bintern\s*ship\b', 'internship'),
+        (r'\bscholar\s*ship\b', 'scholarship'),
+        (r'\bcitizen\s*ship\b', 'citizenship'),
+        (r'\bfriend\s*ship\b', 'friendship'),
+        (r'\bwork\s*place\b', 'workplace'),
+        (r'\bmarket\s*place\b', 'marketplace'),
+        
+        # === FIX COMMON SHORT SPLITS ===
+        (r'\bwi\s*th\b', 'with'),
+        (r'\bwit\s*h\b', 'with'),
+        (r'\bth\s*at\b', 'that'),
+        (r'\btha\s*t\b', 'that'),
+        (r'\bth\s*is\b', 'this'),
+        (r'\bthi\s*s\b', 'this'),
+        (r'\bth\s*ey\b', 'they'),
+        (r'\bthe\s*y\b', 'they'),
+        (r'\bth\s*em\b', 'them'),
+        (r'\bthe\s*m\b', 'them'),
+        (r'\bth\s*eir\b', 'their'),
+        (r'\bthei\s*r\b', 'their'),
+        (r'\bth\s*ere\b', 'there'),
+        (r'\bther\s*e\b', 'there'),
+        (r'\bth\s*ese\b', 'these'),
+        (r'\bthes\s*e\b', 'these'),
+        (r'\bwh\s*ich\b', 'which'),
+        (r'\bwhic\s*h\b', 'which'),
+        (r'\bwh\s*en\b', 'when'),
+        (r'\bwhe\s*n\b', 'when'),
+        (r'\bwh\s*ere\b', 'where'),
+        (r'\bwher\s*e\b', 'where'),
+        (r'\bwh\s*at\b', 'what'),
+        (r'\bwha\s*t\b', 'what'),
+        (r'\bab\s*out\b', 'about'),
+        (r'\babou\s*t\b', 'about'),
+        (r'\bfr\s*om\b', 'from'),
+        (r'\bfro\s*m\b', 'from'),
+        (r'\bhave\b', 'have'),
+        (r'\bha\s*ve\b', 'have'),
+        (r'\bsh\s*ould\b', 'should'),
+        (r'\bshou\s*ld\b', 'should'),
+        (r'\bwo\s*uld\b', 'would'),
+        (r'\bwoul\s*d\b', 'would'),
+        (r'\bco\s*uld\b', 'could'),
+        (r'\bcoul\s*d\b', 'could'),
+        (r'\bbe\s*cause\b', 'because'),
+        (r'\bbecau\s*se\b', 'because'),
+        (r'\bbefor\s*e\b', 'before'),
+        (r'\baft\s*er\b', 'after'),
+        (r'\bafte\s*r\b', 'after'),
+        (r'\both\s*er\b', 'other'),
+        (r'\bothe\s*r\b', 'other'),
+        (r'\beff\s*ect\b', 'effect'),
+        (r'\beffec\s*t\b', 'effect'),
+    ]
+    
+    for pattern, replacement in common_fixes:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        # Preserve case for capitalized versions
+        if replacement[0].isupper():
+            text = re.sub(pattern, replacement, text)
+    
+    # =========================================================================
+    # 2. FIX HYPHENATION ISSUES (11k+ fixes)
+    # =========================================================================
+    # Fix "word -word" → "word-word"
+    text = re.sub(r'(\w)\s+-(\w)', r'\1-\2', text)
+    # Fix "word- word" → "word-word"  
+    text = re.sub(r'(\w)-\s+(\w)', r'\1-\2', text)
+    # Fix "word - word" → "word-word"
+    text = re.sub(r'(\w)\s+-\s+(\w)', r'\1-\2', text)
+    
+    # =========================================================================
+    # 3. FIX PUNCTUATION SPACING (1.3k+ fixes)
+    # =========================================================================
+    # Remove space before punctuation
+    text = re.sub(r'\s+([.,;:!?])', r'\1', text)
+    # Ensure space after punctuation (but not in URLs or numbers)
+    text = re.sub(r'([.!?])([A-Z])', r'\1 \2', text)
+    
+    # =========================================================================
+    # 4. FIX DOUBLE/MULTIPLE SPACES
+    # =========================================================================
+    text = re.sub(r'\s{2,}', ' ', text)
+    
+    # =========================================================================
+    # 4.5. FIX POSSESSIVE/CONTRACTION MISSING SPACES (5k+ issues)
+    # =========================================================================
+    # Fix patterns like "business'slegal" → "business's legal"
+    # Fix patterns like "isn'tshe" → "isn't she"
+    # Fix patterns like "don'tget" → "don't get"
+    
+    # Possessive 's followed by lowercase letter (need space)
+    text = re.sub(r"(\w+)'s([a-z])", r"\1's \2", text)
+    
+    # Contraction 't followed by lowercase letter (need space) - e.g., isn't, don't, won't
+    text = re.sub(r"(\w+)'t([a-z])", r"\1't \2", text)
+    
+    # Contraction 've followed by lowercase letter (need space) - e.g., would've
+    text = re.sub(r"(\w+)'ve([a-z])", r"\1've \2", text)
+    
+    # Contraction 're followed by lowercase letter (need space) - e.g., they're
+    text = re.sub(r"(\w+)'re([a-z])", r"\1're \2", text)
+    
+    # Contraction 'll followed by lowercase letter (need space) - e.g., they'll
+    text = re.sub(r"(\w+)'ll([a-z])", r"\1'll \2", text)
+    
+    # Contraction 'd followed by lowercase letter (need space) - e.g., they'd
+    text = re.sub(r"(\w+)'d([a-z])", r"\1'd \2", text)
+    
+    # =========================================================================
+    # 4.6. FIX ADDITIONAL BROKEN WORDS (found in analysis)
+    # =========================================================================
+    additional_fixes = [
+        # Words found in spacing analysis that were still broken
+        (r'\bciv\s*il\b', 'civil'),
+        (r'\bmaj\s*ority\b', 'majority'),
+        (r'\bret\s*ailers\b', 'retailers'),
+        (r'\brath\s*er\b', 'rather'),
+        (r'\bcons\s*umers\b', 'consumers'),
+        (r'\bcontroll\s*ing\b', 'controlling'),
+        (r'\bslott\s*ing\b', 'slotting'),
+        (r'\bsimplifyi\s*ng\b', 'simplifying'),
+        (r'\beffecti\s*vely\b', 'effectively'),
+        (r'\blisteni\s*ng\b', 'listening'),
+        (r'\bmaki\s*ng\b', 'making'),
+        (r'\btaki\s*ng\b', 'taking'),
+        (r'\bhavi\s*ng\b', 'having'),
+        (r'\bgivi\s*ng\b', 'giving'),
+        (r'\busi\s*ng\b', 'using'),
+        (r'\bmeani\s*ng\b', 'meaning'),
+        (r'\bbec\s*ause\b', 'because'),
+        (r'\bmes\s*sage\b', 'message'),
+        (r'\baff\s*ect\b', 'affect'),
+        (r'\bspe\s*cific\b', 'specific'),
+        (r'\bdiffi\s*cult\b', 'difficult'),
+        (r'\bsemi\s*nar\b', 'seminar'),
+        (r'\binformati\s*on\b', 'information'),
+        (r'\brel\s*y\b', 'rely'),
+        (r'\bYo\s*ucan\b', 'You can'),
+        (r'\bwit\s*htheir\b', 'with their'),
+        (r'\bwit\s*hout\b', 'without'),
+        (r'\bwhi\s*ch\b', 'which'),
+        (r'\bmone\s*y\b', 'money'),
+        (r'\bsho\s*uld\b', 'should'),
+        (r'\bcou\s*ld\b', 'could'),
+        (r'\bwou\s*ld\b', 'would'),
+        (r'\ba\s+re\s+based\b', 'are based'),
+        (r'\bsteppings\s*tones\b', 'steppingstones'),
+        (r'\btriggerne\s*w\b', 'trigger new'),
+        (r'\bveryoutlandish\b', 'very outlandish'),
+        (r'\blisteni\s*ngand\b', 'listening and'),
+        (r'\bwhi\s*chmay\b', 'which may'),
+        (r'\bsimplifyi\s*ngexisting\b', 'simplifying existing'),
+        (r'\brath\s*erthan\b', 'rather than'),
+        (r'\bciv\s*illitigation\b', 'civil litigation'),
+        # More -ing splits
+        (r'\bkee\s*ping\b', 'keeping'),
+        (r'\bsel\s*ling\b', 'selling'),
+        (r'\btel\s*ling\b', 'telling'),
+        (r'\bgett\s*ing\b', 'getting'),
+        (r'\bsett\s*ing\b', 'setting'),
+        (r'\blett\s*ing\b', 'letting'),
+        (r'\bputt\s*ing\b', 'putting'),
+        (r'\bcutt\s*ing\b', 'cutting'),
+        (r'\bhitt\s*ing\b', 'hitting'),
+        (r'\bsitt\s*ing\b', 'sitting'),
+        # More common splits
+        (r'\binfor\s*mation\b', 'information'),
+        (r'\beffici\s*ent\b', 'efficient'),
+        (r'\beffici\s*ency\b', 'efficiency'),
+        (r'\bsuffi\s*cient\b', 'sufficient'),
+        (r'\bdefici\s*ent\b', 'deficient'),
+    ]
+    
+    for pattern, replacement in additional_fixes:
+        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+    
+    # =========================================================================
+    # 5. GENERAL SPLIT WORD FIX (remaining cases)
+    # =========================================================================
+    # Valid small words that should NOT be merged
+    valid_short = {
+        'a', 'i', 'am', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 
+        'in', 'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 
+        'us', 'we', 'a.', 'b.', 'c.', 'd.', 'e.', 're', 'vs', 'ok', 'ex'
+    }
+    
+    def merge_prefix_careful(match):
+        p, w = match.group(1), match.group(2)
+        if p.lower() in valid_short: 
+            return match.group(0)
+        return p + w
+
+    # Merge isolated 1-2 chars followed by 3+ chars (e.g., "th eir" → "their")
+    # Added (?<!') to prevent merging possessives like "owner's invention" -> "owner'sinvention"
+    text = re.sub(r"(?<!')\b([a-zA-Z]{1,2})\s+([a-zA-Z]{3,})\b", merge_prefix_careful, text)
+    
+    def merge_suffix_careful(match):
+        w, s = match.group(1), match.group(2)
+        if s.lower() in valid_short: 
+            return match.group(0)
+        # Don't merge with answer options A-E
+        if s in {'A','B','C','D','E'}: 
+            return match.group(0)
+        # For single char suffixes, only merge common word endings
+        if len(s) == 1:
+            if s.lower() not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'h', 'k', 'p', 'g', 'm'}: 
+                return match.group(0)
+        return w + s
+
+    # Merge 2+ chars followed by isolated 1-2 chars (e.g., "wit h" → "with")
+    text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})\b', merge_suffix_careful, text)
+    
+    # =========================================================================
+    # 6. FINAL CLEANUP
+    # =========================================================================
+    # One more pass for double spaces that may have been created
+    text = re.sub(r'\s{2,}', ' ', text)
+    
+    return text.strip()
+
+
 def _parse_answer_key(lines: List[str]) -> Dict[int, Dict[str, str]]:
     start_idx = -1
+    
+    # Try explicit headers first
     for i in range(len(lines) - 1, -1, -1):
         if re.search(r"answer\s*(key|section)", lines[i], re.IGNORECASE):
             start_idx = i
             break
-    
+            
     if start_idx == -1:
          for i in range(len(lines) - 1, -1, -1):
             if lines[i].strip().upper() == "KEY":
                 start_idx = i
                 break
 
+    # If no header, use sequence detection (robust)
     if start_idx == -1:
-        search_start = int(len(lines) * 0.3)
-        pat_start = re.compile(r"^\s*1[\s.:]+[A-E]\b", re.IGNORECASE)
+        # Scan from 10% to find "1. X" followed by "2. Y"
+        search_start = int(len(lines) * 0.1)
+        pat_num = re.compile(r"^\s*(\d{1,3})\s*[:.-]?\s*([A-E])\b", re.IGNORECASE)
+        
         for i in range(search_start, len(lines)):
-             if pat_start.search(lines[i]):
-                 start_idx = i
-                 break
+            m = pat_num.match(lines[i])
+            if m and int(m.group(1)) == 1:
+                # Potential start, verify sequence
+                # Look for 2, 3 in next 50 lines
+                found_next = False
+                cur_next = 2
+                look_ahead_range = 50
+                for j in range(i + 1, min(i + look_ahead_range * cur_next, len(lines))):
+                     m2 = pat_num.match(lines[j])
+                     if m2:
+                         num_found = int(m2.group(1))
+                         if num_found == cur_next:
+                             cur_next += 1
+                             if cur_next > 3: # Found 1, 2, 3 - confident
+                                 found_next = True
+                                 break
+                
+                if found_next:
+                    start_idx = i
+                    break
 
+    # Last resort fallback
     if start_idx == -1:
         start_idx = max(0, int(len(lines) * 0.8))
 
     answers = {}
-    
-    pattern = re.compile(r"(?<!\d)(\d{1,3})\s*[:.\-)]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
+    # Strict pattern for answer key line: Number + Sep + Letter + Explanation
+    pattern = re.compile(r"(?<!\d)(\d{1,3})\s*[:.-]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
     
     i = start_idx
     while i < len(lines):
-        match = pattern.search(lines[i])
+        line = lines[i]
+        # skip header lines in the key section
+        if _looks_like_header_line(line) or "answer key" in line.lower():
+            i += 1
+            continue
+            
+        match = pattern.search(line)
         if match:
             num = int(match.group(1))
             let = match.group(2).upper()
             expl = match.group(3).strip()
+            
+            # Simple multiline capture for explanation
             i += 1
             while i < len(lines):
-                if pattern.search(lines[i]) or _looks_like_header_line(lines[i]):
+                next_line = lines[i]
+                # Stop if next line looks like new answer or header
+                if pattern.search(next_line) or _looks_like_header_line(next_line):
                     break
-                expl += " " + lines[i].strip()
+                expl += " " + _fix_broken_words(next_line.strip())
                 i += 1
+                
             if 1 <= num <= 100:
-                answers[num] = {"letter": let, "explanation": expl}
+                answers[num] = {"letter": let, "explanation": _fix_broken_words(expl)}
         else:
             i += 1
             
@@ -287,9 +737,14 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
     def finalize_current():
         nonlocal current_q
         if current_q:
-            current_q["prompt"] = _normalize_whitespace(current_q["prompt"])
+            # First normalize standard whitespace
+            prompt = _normalize_whitespace(current_q["prompt"])
+            # Then fix broken word splits
+            current_q["prompt"] = _fix_broken_words(prompt)
+            
             for opt in current_q["options"]:
-                opt["text"] = _normalize_whitespace(opt["text"])
+                text = _normalize_whitespace(opt["text"])
+                opt["text"] = _fix_broken_words(text)
             questions.append(current_q)
         current_q = None
 

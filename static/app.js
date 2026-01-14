@@ -1051,6 +1051,7 @@ function deleteTest(testId, name) {
 
     if (localTests.has(testId)) {
         localTests.delete(testId);
+        deleteLocalTestFromIDB(testId);
         persistLocalTests();
     }
 
@@ -1357,13 +1358,14 @@ document.addEventListener("keydown", (e) => {
 
 
     if (e.key === "ArrowRight" || e.key === "Enter") {
+        const currentQ = state.questions[state.currentIndex];
+        if (currentQ && !state.answers[currentQ.id] && state.currentSelection === null) {
+            return;
+        }
         nextQuestion();
     }
     if (e.key === "ArrowLeft") {
         prevQuestion();
-    }
-    if (e.key === " ") {
-
     }
 });
 
