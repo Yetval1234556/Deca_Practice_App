@@ -594,6 +594,125 @@ def _fix_broken_words(text: str) -> str:
         (r'\beffici\s*ency\b', 'efficiency'),
         (r'\bsuffi\s*cient\b', 'sufficient'),
         (r'\bdefici\s*ent\b', 'deficient'),
+        
+        # === NEW: -ity word splits (from analysis) ===
+        (r'\bprofitabilit\s*y\b', 'profitability'),
+        (r'\babilit\s*y\b', 'ability'),
+        (r'\bqualit\s*y\b', 'quality'),
+        (r'\bliabilit\s*y\b', 'liability'),
+        (r'\bfacilit\s*y\b', 'facility'),
+        (r'\bflexibilit\s*y\b', 'flexibility'),
+        (r'\bresponsibilit\s*y\b', 'responsibility'),
+        (r'\bquantit\s*y\b', 'quantity'),
+        (r'\bactivit\s*y\b', 'activity'),
+        (r'\brealit\s*y\b', 'reality'),
+        (r'\bvariet\s*y\b', 'variety'),
+        (r'\bcurrenc\s*y\b', 'currency'),
+        (r'\bpolic\s*y\b', 'policy'),
+        (r'\bphilosoph\s*y\b', 'philosophy'),
+        (r'\bentiret\s*y\b', 'entirety'),
+        (r'\bhonest\s*y\b', 'honesty'),
+        (r'\bwarrant\s*y\b', 'warranty'),
+        
+        # === NEW: -ly word splits (from analysis) ===
+        (r'\bquickl\s*y\b', 'quickly'),
+        (r'\blikel\s*y\b', 'likely'),
+        (r'\bpositivel\s*y\b', 'positively'),
+        (r'\binitiall\s*y\b', 'initially'),
+        (r'\bstrictl\s*y\b', 'strictly'),
+        (r'\bsimilarl\s*y\b', 'similarly'),
+        (r'\bfriendl\s*y\b', 'friendly'),
+        (r'\bnecessar\s*y\b', 'necessary'),
+        (r'\bhorsepla\s*y\b', 'horseplay'),
+        (r'\bhapp\s*y\b', 'happy'),
+        (r'\bjul\s*y\b', 'july'),
+        (r'\bvar\s*y\b', 'vary'),
+        
+        # === NEW: -ic word splits (from analysis) ===
+        (r'\bstrategi\s*c\b', 'strategic'),
+        (r'\bspecifi\s*c\b', 'specific'),
+        (r'\bethi\s*c\b', 'ethic'),
+        
+        # === NEW: -ew/-ow/-elf word splits ===
+        (r'\bvie\s*w\b', 'view'),
+        (r'\bfollo\s*w\b', 'follow'),
+        (r'\bhersel\s*f\b', 'herself'),
+        (r'\byoursel\s*f\b', 'yourself'),
+        
+        # === NEW: Compound word fixes ===
+        (r'\brightha\s*nd\b', 'righthand'),
+        (r'\bcleanai\s*r\b', 'clean air'),
+        (r'\banden\s*d\b', 'and end'),
+        (r'\bandh\s*e\b', 'and he'),
+        (r'\bthewa\s*y\b', 'the way'),
+        (r'\bhisbo\s*ss\b', 'his boss'),
+        (r'\bnationalla\s*w\b', 'national law'),
+        (r'\bpowerfulwa\s*y\b', 'powerful way'),
+        (r'\binformationma\s*y\b', 'information may'),
+        (r'\bhelpyo\s*u\b', 'help you'),
+        (r'\buseshi\s*gh\b', 'uses high'),
+        (r'\briverlogi\s*c\b', 'riverlogic'),
+        
+        # === NEW: More -ity splits found in analysis ===
+        (r'\btangibil\s*ity\b', 'tangibility'),
+        (r'\bintegr\s*ity\b', 'integrity'),
+        (r'\bliabil\s*ity\b', 'liability'),
+        (r'\bcommun\s*ity\b', 'community'),
+        (r'\bhospital\s*ity\b', 'hospitality'),
+        (r'\bfacil\s*ity\b', 'facility'),
+        (r'\bequ\s*ity\b', 'equity'),
+        (r'\bviabil\s*ity\b', 'viability'),
+        (r'\bresponsibil\s*ity\b', 'responsibility'),
+        (r'\bcapabil\s*ity\b', 'capability'),
+        (r'\bpossibil\s*ity\b', 'possibility'),
+        (r'\bstabil\s*ity\b', 'stability'),
+        (r'\bvisibil\s*ity\b', 'visibility'),
+        (r'\bflexibil\s*ity\b', 'flexibility'),
+        (r'\bcredibil\s*ity\b', 'credibility'),
+        (r'\bdurabil\s*ity\b', 'durability'),
+        (r'\bavailabil\s*ity\b', 'availability'),
+        (r'\baccountabil\s*ity\b', 'accountability'),
+        (r'\breliabil\s*ity\b', 'reliability'),
+        (r'\bsustainabil\s*ity\b', 'sustainability'),
+        
+        # === NEW: Run-on word fixes ===
+        (r'\byo\s*ucan\b', 'you can'),
+        (r'\by\s*ouachieve\b', 'you achieve'),
+        (r'\by\s*ouhave\b', 'you have'),
+        (r'\by\s*oushould\b', 'you should'),
+        (r'\by\s*ounext\b', 'you next'),
+        (r'\byo\s*uare\b', 'you are'),
+        (r'\bt\s*ocalculate\b', 'to calculate'),
+        (r'\bt\s*oinfluence\b', 'to influence'),
+        (r'\bt\s*ocheck\b', 'to check'),
+        (r'\bo\s*wnstore\b', 'own store'),
+        (r'\bo\s*wnideas\b', 'own ideas'),
+        (r'\bo\s*raffect\b', 'or affect'),
+        (r'\bo\s*fcompetitors\b', 'of competitors'),
+        (r'\bo\s*ffinancial\b', 'of financial'),
+        (r'\bo\s*fnegotiating\b', 'of negotiating'),
+        (r'\bo\s*nanyone\b', 'on anyone'),
+        (r'\bb\s*eexperts\b', 'be experts'),
+        (r'\bb\s*ylogical\b', 'by logical'),
+        (r'\bb\s*ycombining\b', 'by combining'),
+        (r'\bb\s*utdaily\b', 'but daily'),
+        (r'\bb\s*yfollowing\b', 'by following'),
+        (r'\bb\s*eviewed\b', 'be viewed'),
+        (r'\bb\s*ymultiplying\b', 'by multiplying'),
+        (r'\bs\s*etassumptions\b', 'set assumptions'),
+        (r'\bs\s*othey\b', 'so they'),
+        (r'\bf\s*argreater\b', 'far greater'),
+        (r'\bf\s*ewquestions\b', 'few questions'),
+        (r'\bho\s*wclosely\b', 'how closely'),
+        (r'\bw\s*eall\b', 'we all'),
+        (r'\bj\s*obapplicant\b', 'job applicant'),
+        (r'\bx\s*yzgrocery\b', 'xyz grocery'),
+        (r'\bda\s*ysago\b', 'days ago'),
+        (r'\bd\s*aycare\b', 'daycare'),
+        (r'\ban\s*y\b', 'any'),
+        (r'\bcantr\s*y\b', 'can try'),
+        (r'\bsinc\s*ey\b', 'since y'),
+        (r'\bcall\s*y\b', 'cally'),  # Likely a name
     ]
     
     for pattern, replacement in additional_fixes:
@@ -693,7 +812,7 @@ def _parse_answer_key(lines: List[str]) -> Dict[int, Dict[str, str]]:
 
     answers = {}
     # Strict pattern for answer key line: Number + Sep + Letter + Explanation
-    pattern = re.compile(r"(?<!\d)(\d{1,3})\s*[:.-]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
+    pattern = re.compile(r"^\s*(\d{1,3})\s*[:.-]?\s*([A-E])\b\s*(.*)", re.IGNORECASE)
     
     i = start_idx
     while i < len(lines):
