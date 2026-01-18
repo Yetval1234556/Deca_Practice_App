@@ -24,13 +24,13 @@ SESSION_DATA_DIR = INSTANCE_DIR / "sessions"
 try:
     TESTS_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
-    print("⚠️  WARNING: Could not create TESTS_DIR. Uploads might fail if not using /tmp.")
+    logger.warning("Could not create TESTS_DIR. Uploads might fail if not using /tmp.")
 
 try:
     SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 except Exception:
     
-    print("⚠️  WARNING: Read-only filesystem detected. Using /tmp for sessions.")
+    logger.warning("Read-only filesystem detected. Using /tmp for sessions.")
     SESSION_DATA_DIR = Path(tempfile.gettempdir()) / "deca_app_sessions"
     SESSION_DATA_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -43,11 +43,37 @@ if not SECRET_KEY:
     if os.getenv("ENVIRONMENT") == "production":
         import secrets
         SECRET_KEY = secrets.token_hex(32)
-        print("⚠️  WARNING: SECRET_KEY not set in production. Generated temporary key.")
+        logger.warning("SECRET_KEY not set in production. Generated temporary key.")
     else:
         SECRET_KEY = "dev-secret-key"
-        print("⚠️  WARNING: Using default SECRET_KEY in development")
+        if os.getenv("ENVIRONMENT") == "production":
+            logger.warning("Using default SECRET_KEY in development mode (or missing in prod)")
+        else:
+            logger.info("Using default SECRET_KEY in development")
 SESSION_CLEANUP_AGE_SECONDS = 86400
+
+
+# --- Logging Configuration ---
+import logging
+# Suppress default Flask/Werkzeug access logs (e.g. "GET / ... 200")
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+# Configure app logger
+# Ensure instance dir exists for logs
+INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = INSTANCE_DIR / "activity.log"
+
+logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO) # Capture INFO for activity tracking
+
+# File Handler (Persistent Logs)
+from logging.handlers import RotatingFileHandler
+file_handler = RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+file_handler.setLevel(logging.INFO)
+logger.addHandler(file_handler)
 
 # Ensure DB is in a writable location
 DB_PATH = SESSION_DATA_DIR / "sessions.db"
@@ -58,11 +84,11 @@ def _init_db():
             conn.execute("CREATE TABLE IF NOT EXISTS sessions (id TEXT PRIMARY KEY, data TEXT, updated_at REAL)")
             conn.execute("CREATE TABLE IF NOT EXISTS active_users (ip TEXT PRIMARY KEY, ua TEXT, last_seen REAL)")
             conn.commit()
-        print(f"✅ Database initialized at {DB_PATH}")
+        logger.info(f"Database initialized at {DB_PATH}")
     except Exception as e:
-        print(f"❌ FATAL: Database initialization failed: {e}")
-        print(f"Database path: {DB_PATH}")
-        print("Application cannot continue without database.")
+        logger.critical(f"FATAL: Database initialization failed: {e}")
+        logger.critical(f"Database path: {DB_PATH}")
+        logger.critical("Application cannot continue without database.")
         import sys
         sys.exit(1)
 
@@ -75,6 +101,10 @@ app.config.update(
     SESSION_TYPE="filesystem",
 )
 
+
+
+# -----------------------------
+
 import threading
 def _background_cleanup():
     """Run cleanup periodically in background"""
@@ -84,7 +114,7 @@ def _background_cleanup():
         try:
             _cleanup_old_sessions()
         except Exception as e:
-            print(f"Background cleanup error: {e}")
+            logger.error(f"Background cleanup error: {e}")
 
 cleanup_thread = threading.Thread(target=_background_cleanup, daemon=True)
 cleanup_thread.start()
@@ -118,6 +148,12 @@ def track_active_user():
             ua = request.headers.get("User-Agent", "Unknown")
             now = time.time()
             with sqlite3.connect(DB_PATH) as conn:
+                # Check if new user
+                cursor = conn.execute("SELECT last_seen FROM active_users WHERE ip = ?", (ip,))
+                row = cursor.fetchone()
+                if not row:
+                    logger.info(f"NEW USER ARRIVED: {ip} | UA: {ua}")
+                
                 conn.execute("INSERT OR REPLACE INTO active_users (ip, ua, last_seen) VALUES (?, ?, ?)",
                              (ip, ua, now))
                 conn.commit()
@@ -260,7 +296,9 @@ def _worker_process_page(source_path: str, page_num: int, temp_file_path: str = 
 
         return lines
     except Exception as e:
-        print(f"Worker Parsing Error on page {page_num}: {e}")
+        # Use print in worker as logging config might not be propagated
+        # or rely on stderr
+        print(f"Worker Parsing Error on page {page_num}: {e}", file=sys.stderr)
         return []
 
 
@@ -317,7 +355,7 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     page_lines = future.result()
                     lines.extend(page_lines)
                 except Exception as e:
-                    print(f"Page processing error: {e}")
+                    logger.error(f"Page processing error: {e}")
                     
     finally:
         if temp_path and os.path.exists(temp_path):
@@ -1584,7 +1622,7 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
     except Exception as e:
         
         app.logger.error(f"PDF parsing error for '{name_hint}': {e}", exc_info=True)
-        print(f"⚠️  Parsing error for '{name_hint}': {e}")
+        logger.warning(f"Parsing error for '{name_hint}': {e}")
         return {}
 
 def _sanitize_questions(questions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1629,14 +1667,39 @@ def _save_session_data(sid: str, data: Dict[str, Any]):
     _save_session_data_db(sid, data)
 
 def _cleanup_old_sessions():
-    """Removes sessions older than SESSION_CLEANUP_AGE_SECONDS."""
+    """Delete sessions and files older than 7 days"""
     try:
-        limit_time = time.time() - SESSION_CLEANUP_AGE_SECONDS
+        now = time.time()
+        # 7 days retention
+        max_age = 7 * 24 * 3600 
+        cutoff = now - max_age
+        
+        # 1. Clean DB Sessions
         with sqlite3.connect(DB_PATH) as conn:
-            conn.execute("DELETE FROM sessions WHERE updated_at < ?", (limit_time,))
+            conn.execute("DELETE FROM sessions WHERE updated_at < ?", (cutoff,))
+            deleted = conn.total_changes
             conn.commit()
+            if deleted > 0:
+                app.logger.info(f"Cleaned up {deleted} expired sessions (>7 days)")
+
+        # 2. Clean PDF Files in TESTS_DIR
+        if TESTS_DIR.exists():
+            count = 0
+            for item in TESTS_DIR.glob("*.pdf"):
+                try:
+                    stats = item.stat()
+                    # Check modification time
+                    if stats.st_mtime < cutoff:
+                        item.unlink()
+                        count += 1
+                except Exception as e:
+                    app.logger.error(f"Error deleting old file {item}: {e}")
+            
+            if count > 0:
+                app.logger.info(f"Deleted {count} old PDF files (>7 days)")
+                
     except Exception as e:
-        print(f"Cleanup error: {e}")
+        app.logger.error(f"Error during cleanup: {e}")
 
 def _get_all_tests_for_session(force_refresh=False) -> Dict[str, Any]:
     all_tests = {}
@@ -1721,6 +1784,11 @@ def start_quiz(test_id):
         
     payload = request.json or {}
     mode = payload.get("mode", "regular")
+    
+    # Log activity
+    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    logger.info(f"TEST STARTED: {test_id} | Mode: {mode} | IP: {ip}")
+
     count = payload.get("count")
     
     questions = test["questions"]
@@ -1758,6 +1826,8 @@ def start_quiz(test_id):
 def upload_pdf():
     f = request.files.get("file")
     if not f: abort(400, "No file")
+
+    logger.info(f"TEST UPLOADED: {f.filename} | IP: {request.remote_addr}")
     
     raw = f.read()
     if len(raw) > MAX_UPLOAD_BYTES:

@@ -56,6 +56,9 @@
       <button class="btn-nav" onclick="openCredits()">
         <i class="ph ph-info"></i> About
       </button>
+      <button class="btn-nav" onclick="openHistory()">
+        <i class="ph ph-clock-counter-clockwise"></i> History
+      </button>
       <button class="btn-nav" onclick="openSettings()">
         <i class="ph ph-gear"></i> Settings
       </button>
@@ -374,6 +377,41 @@
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="history-overlay" class="settings-overlay hidden">
+    <div class="settings-modal"
+      style="max-width: 600px; margin: auto; height: 80vh; display: flex; flex-direction: column;">
+      <div class="settings-topbar">
+        <div class="setting-header">
+          <div class="symbol-small" style="background: rgba(var(--primary), 0.1); color: var(--primary);">
+            <i class="ph ph-clock-counter-clockwise"></i>
+          </div>
+          <div class="setting-title">
+            <h4>History</h4>
+            <p class="muted">Your past sessions (last 7 days)</p>
+          </div>
+          <button class="btn-icon" onclick="closeHistory()" aria-label="Close history">
+            <i class="ph ph-x"></i>
+          </button>
+        </div>
+      </div>
+
+      <div class="panel" style="flex: 1; overflow-y: auto; padding: 0;">
+        <div id="history-list" class="history-list">
+          <!-- Populated by JS -->
+          <div class="placeholder" style="padding: 40px;">
+            <p class="muted">No history found.</p>
+          </div>
+        </div>
+      </div>
+
+      <div style="padding: 16px; border-top: 1px solid var(--card-border); text-align: right;">
+        <button class="ghost text-danger small-btn" onclick="clearHistory()">
+          Clear All
+        </button>
       </div>
     </div>
   </div>

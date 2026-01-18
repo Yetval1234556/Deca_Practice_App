@@ -444,6 +444,7 @@ function saveSessionToHistory() {
         testId: state.activeTest.id,
         testName: state.activeTest.name,
         date: new Date().toISOString(),
+        timestamp: Date.now(),
         score: state.score,
         total: state.questions.length,
         elapsedMs: state.totalElapsedMs,
@@ -605,9 +606,15 @@ function updateProgress() {
 
 function updateSessionMeta() {
     if (!sessionFooter) return;
-    if (!state.activeTest || !state.questions.length) {
+
+    // Hide footer if no test active OR if session is complete (summary view)
+    if (!state.activeTest || !state.questions.length || state.sessionComplete) {
         sessionFooter.classList.add("hidden");
-        sessionFooter.innerHTML = `<span class="muted">No test in progress.</span>`;
+        // Only clear text if no test, to preserve state if needed? 
+        // Actually clearing text is safer to avoid flashing old state.
+        if (!state.activeTest) {
+            sessionFooter.innerHTML = `<span class="muted">No test in progress.</span>`;
+        }
         return;
     }
     const answered = state.questions.reduce((acc, q) => (questionDone(q.id) ? acc + 1 : acc), 0);
@@ -2188,3 +2195,94 @@ document.addEventListener("DOMContentLoaded", async () => {
     // Initialize the app
     init();
 });
+
+// --- History Logic ---
+
+const MAX_HISTORY_AGE_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function openHistory() {
+    const overlay = document.getElementById("history-overlay");
+    if (!overlay) return;
+    renderHistory(); // Refresh list
+    overlay.classList.remove("hidden");
+}
+
+function closeHistory() {
+    const overlay = document.getElementById("history-overlay");
+    if (overlay) overlay.classList.add("hidden");
+}
+
+function clearHistory() {
+    if (!confirm("Delete all history?")) return;
+    localStorage.removeItem(HISTORY_KEY);
+    renderHistory();
+}
+
+function renderHistory() {
+    const list = document.getElementById("history-list");
+    if (!list) return;
+
+    let history = [];
+    try {
+        history = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
+    } catch (e) { console.error(e); }
+
+    // Filter older than 7 days
+    const now = Date.now();
+    const cleanHistory = history.filter(h => {
+        // Use timestamp if available, else parse date string
+        let ts = h.timestamp;
+        if (!ts && h.date) ts = new Date(h.date).getTime();
+        if (!ts) return false;
+
+        // Ensure object has timestamp for future
+        h.timestamp = ts;
+
+        return (now - ts) < MAX_HISTORY_AGE_MS;
+    });
+
+    // Update storage if items were removed (enforce client-side retention)
+    if (cleanHistory.length !== history.length) {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(cleanHistory));
+    }
+
+    if (cleanHistory.length === 0) {
+        list.innerHTML = `<div class="placeholder" style="padding: 40px;"><p class="muted">No history found (last 7 days).</p></div>`;
+        return;
+    }
+
+    // Sort descending
+    cleanHistory.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+    let html = "";
+    cleanHistory.forEach(h => {
+        const dateStr = new Date(h.timestamp).toLocaleString();
+        const score = h.score || 0;
+        const total = h.total || 0;
+        const pct = total > 0 ? Math.round((score / total) * 100) : 0;
+        const testName = escapeHtml(h.testName || "Unknown Test");
+
+        // Badge color
+        let badgeClass = "badge-neutral";
+        if (pct >= 90) badgeClass = "badge-gold";
+        else if (pct >= 80) badgeClass = "badge-silver";
+        else if (pct >= 70) badgeClass = "badge-bronze";
+
+        html += `
+        <div class="history-card" style="padding: 16px; border-bottom: 1px solid var(--card-border);">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <div>
+                   <h4 style="margin: 0; color: var(--text-main); font-size: 1rem;">${testName}</h4>
+                   <p class="muted small" style="margin: 4px 0 0 0;">${dateStr}</p>
+                </div>
+                <div style="text-align:right;">
+                    <div class="summary-badge ${badgeClass}" style="font-size: 0.8rem; padding: 4px 8px;">${pct}%</div>
+                    <p class="small" style="margin-top:4px;">${score}/${total}</p>
+                </div>
+            </div>
+        </div>
+        `;
+    });
+
+    list.innerHTML = html;
+}
