@@ -398,6 +398,14 @@ async function handleUpload() {
             data = JSON.parse(rawText);
         } catch (e) {
             console.error("Non-JSON response", rawText);
+            // Check if it's an HTML error page
+            if (rawText.trim().startsWith("<")) {
+                const titleMatch = rawText.match(/<title>(.*?)<\/title>/i);
+                if (titleMatch) {
+                    throw new Error(`Server Error: ${titleMatch[1]}`);
+                }
+                throw new Error("Server Error: The server returned an invalid response (HTML).");
+            }
             throw new Error(rawText ? `Server error: ${rawText.substring(0, 100)}...` : "Upload failed (Empty response).");
         }
 

@@ -270,7 +270,7 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
         
     return final_lines
 
-COMMON_FIXES = [
+COMMON_FIXES_RAW = [
     # === CRITICAL EDGE CASES: Short word splits ===
     # These happen when common words get split at unusual points
     (r'\ba\s+nd\b', 'and'),
@@ -545,7 +545,7 @@ COMMON_FIXES = [
     (r'\beffec\s*t\b', 'effect'),
 ]
 
-ADDITIONAL_FIXES = [
+ADDITIONAL_FIXES_RAW = [
     # Words found in spacing analysis that were still broken
     (r'\bciv\s*il\b', 'civil'),
     (r'\bmaj\s*ority\b', 'majority'),
@@ -948,6 +948,10 @@ ADDITIONAL_FIXES = [
     (r'(\w)-\s+(\w)', r'\1-\2'),
 ]
 
+
+COMMON_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in COMMON_FIXES_RAW]
+
+ADDITIONAL_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in ADDITIONAL_FIXES_RAW]
 def _fix_broken_words(text: str) -> str:
     if not text: return ""
     
@@ -974,7 +978,7 @@ def _fix_broken_words(text: str) -> str:
                 return replacement[0].upper() + replacement[1:]
             return replacement
             
-        text = re.sub(pattern, preserve_case, text, flags=re.IGNORECASE)
+        text = pattern.sub(preserve_case, text)
     
     # =========================================================================
     # 2. FIX HYPHENATION ISSUES (11k+ fixes)
@@ -1039,7 +1043,7 @@ def _fix_broken_words(text: str) -> str:
     # Used global ADDITIONAL_FIXES
     
     for pattern, replacement in ADDITIONAL_FIXES:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
+        text = pattern.sub(replacement, text)
     
     # =========================================================================
     # 5. GENERAL SPLIT WORD FIX (remaining cases)
