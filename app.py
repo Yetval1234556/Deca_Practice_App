@@ -16,6 +16,26 @@ from flask import Flask, jsonify, render_template, request, abort, redirect, url
 from pypdf import PdfReader
 from werkzeug.exceptions import HTTPException
 
+# --- Logging Configuration ---
+import logging
+import sys
+
+# Suppress default Flask/Werkzeug access logs (e.g. "GET / ... 200")
+log = logging.getLogger('werkzeug')
+log.setLevel(logging.ERROR)
+
+# Configure app logger to output to Console (StreamHandler)
+# This ensures logs are visible in the platform dashboard and avoids filesystem issues
+logging.basicConfig(
+    level=logging.WARNING, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO) # Capture INFO for activity tracking (New User, Uploads, etc.)
+
 BASE_DIR = Path(__file__).parent.resolve()
 TESTS_DIR = BASE_DIR / "tests"
 INSTANCE_DIR = BASE_DIR / "instance"
@@ -53,25 +73,7 @@ if not SECRET_KEY:
 SESSION_CLEANUP_AGE_SECONDS = 86400
 
 
-# --- Logging Configuration ---
-import logging
-import sys
 
-# Suppress default Flask/Werkzeug access logs (e.g. "GET / ... 200")
-log = logging.getLogger('werkzeug')
-log.setLevel(logging.ERROR)
-
-# Configure app logger to output to Console (StreamHandler)
-# This ensures logs are visible in the platform dashboard and avoids filesystem issues
-logging.basicConfig(
-    level=logging.WARNING, 
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO) # Capture INFO for activity tracking (New User, Uploads, etc.)
 
 # Ensure DB is in a writable location
 DB_PATH = SESSION_DATA_DIR / "sessions.db"
