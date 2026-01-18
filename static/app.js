@@ -392,14 +392,13 @@ async function handleUpload() {
             credentials: "same-origin",
         });
 
+        const rawText = await res.text().catch(() => "");
         let data;
         try {
-            data = await res.json();
+            data = JSON.parse(rawText);
         } catch (e) {
-            console.error("Non-JSON response", e);
-            // Try to read text to show user what happened
-            const text = await res.text().catch(() => null);
-            throw new Error(text ? `Server error: ${text.substring(0, 100)}...` : "Upload failed (Invalid response).");
+            console.error("Non-JSON response", rawText);
+            throw new Error(rawText ? `Server error: ${rawText.substring(0, 100)}...` : "Upload failed (Empty response).");
         }
 
         if (!res.ok || !data) {
