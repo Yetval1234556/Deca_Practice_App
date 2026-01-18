@@ -6,6 +6,7 @@ import random
 import tempfile
 import uuid
 import shutil
+import concurrent.futures
 import time
 import sqlite3
 from pathlib import Path
@@ -173,39 +174,48 @@ def _looks_like_header_line(text: str) -> bool:
         return True
     return False
 
-def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
-    reader = PdfReader(source)
-    lines: List[str] = []
 
-    splitter = re.compile(r"\s{2,}(?=(?:\d{1,3}|[A-E])\s*[.:\-])")
+def _worker_process_page(source_path: str, page_num: int, temp_file_path: str = None) -> List[str]:
+    try:
+        # Re-open the file in the worker
+        # If temp_file is provided, use that
+        path_to_use = temp_file_path if temp_file_path else source_path
+        
+        reader = PdfReader(path_to_use)
+        if page_num >= len(reader.pages):
+            return []
+        page = reader.pages[page_num]
+        
+        lines = []
+        splitter = re.compile(r"\s{2,}(?=(?:\d{1,3}|[A-E])\s*[.:\-])")
+        
 
-    for page in reader.pages:
         raw_text = page.extract_text() or ""
         for raw_line in raw_text.splitlines():
             if splitter.search(raw_line):
                 parts = splitter.split(raw_line)
             else:
                 parts = [raw_line]
-                
+
             for line in parts:
                 line = line.strip()
                 if not line:
                     continue
-                
+
                 line = re.sub(r"\s{2,}", " ", line)
 
                 footer_regex = re.compile(r"(?:^|\s+)\b([A-Z]{3,5}\s*[-–—]\s*[A-Z])")
                 footer_match = footer_regex.search(line)
                 if footer_match:
                      line = line[:footer_match.start()].strip()
-                     
+
                      line = re.sub(r"\s+(and|Cluster)$", "", line).strip()
                      line = re.sub(r"\s+(Business Management|Hospitality|Finance|Marketing|Entrepreneurship|Administration)\s*$", "", line).strip()
-                
-                
+
+
                 if "specialist levels." in line:
                     line = line.replace("specialist levels.", "").strip()
-                
+
                 # Handle copyright lines that may have answer key concatenated (e.g., "Ohio1.A")
                 ohio_match = re.search(r"(Center®?,?\s*Columbus,?\s*Ohio)\s*(\d{1,3}\s*[.:,-]?\s*[A-E].*)?$", line, re.IGNORECASE)
                 if ohio_match:
@@ -214,14 +224,14 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     line = line[:ohio_match.start()].strip()
                     if answer_part:
                         lines.append(answer_part.strip())
-                
+
                 if "career -sustaining" in line:
                     line = line.split("career -sustaining")[0].strip()
                 if line.endswith("Business Management and"):
                     line = line[:-23].strip() 
                 if "sustaining, specialist, supervi" in line:
                     line = line.split("sustaining, specialist, supervi")[0].strip()
-                
+
                 # Enhanced strict footer stripping
                 line = re.sub(r"(?:^|\s+)Hospitality and Tourism.*$", "", line, flags=re.IGNORECASE).strip()
                 line = re.sub(r"(?:^|\s+)Business Management.*$", "", line, flags=re.IGNORECASE).strip()
@@ -235,7 +245,7 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 line = re.sub(r"(?:^|\s+)are at the prerequisite.*$", "", line, flags=re.IGNORECASE).strip()
                 line = re.sub(r"(?:^|\s+)Competitive Events.*$", "", line, flags=re.IGNORECASE).strip()
                 line = re.sub(r"(?:^|\s+)Test-Item Bank.*$", "", line, flags=re.IGNORECASE).strip()
-                
+
                 # Check for header/footer but be careful not to trigger on question text
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
@@ -245,17 +255,87 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                              continue
                     else:
                         continue
-                    
+
                 lines.append(line)
+
+        return lines
+    except Exception as e:
+        print(f"Worker Parsing Error on page {page_num}: {e}")
+        return []
+
+
+def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
+    # Handle ByteIO by dumping to temp file
+    temp_path = None
+    is_bytes = isinstance(source, (io.BytesIO, bytes)) or (hasattr(source, 'read') and not isinstance(source, (str, Path)))
+    
+    try:
+        if is_bytes:
+            # Create a named temp file that persists so workers can read it
+            # Close it so workers can open it
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
+                if hasattr(source, 'read'):
+                    source.seek(0)
+                    shutil.copyfileobj(source, tmp)
+                else:
+                    tmp.write(source)
+                temp_path = tmp.name
             
+            # Open reader just to get page count
+            reader = PdfReader(temp_path)
+            source_path_arg = None # Don't pass source_path if using temp
+            path_for_worker = temp_path
+        else:
+            source = Path(source)
+            reader = PdfReader(source)
+            source_path_arg = str(source)
+            path_for_worker = None # Worker uses source_path_arg
+            
+        num_pages = len(reader.pages)
+        lines = []
+        
+        # Determine strict header threshold first?
+        # No, we need lines first.
+        # But we need page count for threshold, which we have.
+        
+        # Parallel Execution
+        # 4 workers is usually sweet spot for PDF extraction
+        max_workers = min(8, num_pages) if num_pages > 0 else 1
+        
+        with concurrent.futures.ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Map page numbers to workers
+            # Pass source_path_arg as first arg (if real file), or None
+            # Pass temp_path as third arg
+            
+            futures = []
+            for i in range(num_pages):
+                # Args: (source_path, page_num, temp_file_path)
+                futures.append(executor.submit(_worker_process_page, source_path_arg, i, path_for_worker))
+                
+            for future in futures:
+                try:
+                    page_lines = future.result()
+                    lines.extend(page_lines)
+                except Exception as e:
+                    print(f"Page processing error: {e}")
+                    
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except:
+                pass
+
     # Remove duplicates that appear on almost every page (headers/footers)
+    # (Original logic follows)
     counts = {}
     for l in lines:
         counts[l] = counts.get(l, 0) + 1
     
     # Calculate a dynamic threshold based on page count
     # If a line appears on > 40% of pages, it's likely a header
-    page_count = len(reader.pages)
+    # page_count variable needs to be reused.
+    page_count = num_pages 
     threshold = max(2, int(page_count * 0.4))
     
     final_lines = []
@@ -269,6 +349,7 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
         final_lines.append(l)
         
     return final_lines
+
 
 COMMON_FIXES_RAW = [
     # === CRITICAL EDGE CASES: Short word splits ===
