@@ -1343,7 +1343,18 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
                     # Next label
                     lbl = m.group(1).upper()
                     if idx == len(matches) - 1:
-                return parts
+                        # Last match, content is everything after
+                        content = full_text[m.end():].strip()
+                        parts.append((lbl, content))
+                    else:
+                        # Store label to pair with next content
+                        parts.append((lbl, None)) # Placeholder
+                        
+                    last_end = m.end()
+                
+                # If we had matches, we need to reconstruct
+                # The first 'part' belongs to the option we are currently processing (e.g. A)
+                # The subsequent parts are new options (B, C, ...)
 
             # Attempt to split the text we just found
             # Note: opt_match gave us the text for the current label
