@@ -144,6 +144,10 @@ def _json_generic_error(exc: Exception):
     raise exc
 
 def _looks_like_header_line(text: str) -> bool:
+    # Don't treat option lines as headers
+    if re.match(r"^\s*[A-E]\s*[).:\-]", text):
+        return False
+        
     patterns = [
         r"(?i)\bcluster\b",
         r"(?i)\bcareer\s+cluster\b",
@@ -152,13 +156,20 @@ def _looks_like_header_line(text: str) -> bool:
         r"(?i)\bexam\b",
         r"(?i)^page\s+\d+",
         r"^\d+\s*(of|/)\s*\d+$",
-        r"(?i)copyright",
+        # Only match actual copyright notices (with © or year), not answer content
+        r"(?i)copyright\s*©",
+        r"(?i)copyright\s*\d{4}",
         r"^[A-Z]{3,4}\s+-\s+[A-Z]", 
     ]
     if any(re.search(p, text) for p in patterns):
         return True
+    
+    # Stricter check for all-caps lines to avoid false positives on short question text
     tokens = text.split()
     if len(tokens) >= 3 and all(tok.isupper() or re.fullmatch(r"[A-Z0-9\-]+", tok) for tok in tokens):
+        # Exclude common question words even if capitalized
+        if "WHICH" in text.upper() or "WHAT" in text.upper():
+            return False
         return True
     return False
 
@@ -183,10 +194,6 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 
                 line = re.sub(r"\s{2,}", " ", line)
 
-                
-                
-                
-                
                 footer_regex = re.compile(r"(?:^|\s+)\b([A-Z]{3,5}\s*[-–—]\s*[A-Z])")
                 footer_match = footer_regex.search(line)
                 if footer_match:
@@ -219,8 +226,17 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                 line = re.sub(r"(?:^|\s+)Hospitality and Tourism.*$", "", line, flags=re.IGNORECASE).strip()
                 line = re.sub(r"(?:^|\s+)Business Management.*$", "", line, flags=re.IGNORECASE).strip()
                 line = re.sub(r"(?:^|\s+)\d{4}-\d{4}.*$", "", line).strip()
-                line = re.sub(r"(?:^|\s+)Copyright.*$", "", line, flags=re.IGNORECASE).strip()
+                # Only strip actual copyright notices (with © symbol or year pattern), not answer content
+                line = re.sub(r"(?:^|\s+)Copyright\s*©.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Copyright\s*\d{4}.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)CAUTION: Posting these materials.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Test questions were developed by.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Performance indicators for these.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)are at the prerequisite.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Competitive Events.*$", "", line, flags=re.IGNORECASE).strip()
+                line = re.sub(r"(?:^|\s+)Test-Item Bank.*$", "", line, flags=re.IGNORECASE).strip()
                 
+                # Check for header/footer but be careful not to trigger on question text
                 if _looks_like_header_line(line):
                     cleaned = re.sub(r"(?i)^.*?copyright.*?ohio\s*", "", line)
                     if cleaned and cleaned != line:
@@ -232,12 +248,26 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
                     
                 lines.append(line)
             
+    # Remove duplicates that appear on almost every page (headers/footers)
     counts = {}
     for l in lines:
         counts[l] = counts.get(l, 0) + 1
     
-    threshold = max(2, len(reader.pages) // 2)
-    final_lines = [l for l in lines if counts[l] < threshold and not _looks_like_header_line(l)]
+    # Calculate a dynamic threshold based on page count
+    # If a line appears on > 40% of pages, it's likely a header
+    page_count = len(reader.pages)
+    threshold = max(2, int(page_count * 0.4))
+    
+    final_lines = []
+    for l in lines:
+        # If line is very common, skip it
+        if counts[l] > threshold:
+            continue
+        # If line looks like a header (and we missed it earlier), skip it
+        if _looks_like_header_line(l):
+            continue
+        final_lines.append(l)
+        
     return final_lines
 
 def _fix_broken_words(text: str) -> str:
@@ -248,6 +278,51 @@ def _fix_broken_words(text: str) -> str:
     # =========================================================================
     # These are the most common PDF extraction artifacts - comprehensive list
     common_fixes = [
+        # === CRITICAL EDGE CASES: Short word splits ===
+        # These happen when common words get split at unusual points
+        (r'\ba\s+nd\b', 'and'),
+        (r'\ba\s+ndthe\b', 'and the'),
+        (r'\ba\s+s\b', 'as'),  # Only when followed by space
+        (r'\bo\s+f\b', 'of'),
+        (r'\bo\s+n\b', 'on'),
+        (r'\bo\s+r\b', 'or'),
+        (r'\bi\s+n\b', 'in'),
+        (r'\bi\s+s\b', 'is'),
+        (r'\bi\s+t\b', 'it'),
+        (r'\bt\s+o\b', 'to'),
+        (r'\bt\s+he\b', 'the'),
+        (r'\bw\s+e\b', 'we'),
+        (r'\bb\s+e\b', 'be'),
+        (r'\bb\s+y\b', 'by'),
+        (r'\ba\s+t\b', 'at'),
+        (r'\bu\s+p\b', 'up'),
+        (r'\bn\s+o\b', 'no'),
+        (r'\bs\s+o\b', 'so'),
+        (r'\bm\s+y\b', 'my'),
+        (r'\bh\s+e\b', 'he'),
+        (r'\bf\s+or\b', 'for'),
+        (r'\bf\s+rom\b', 'from'),
+        (r'\bw\s+ith\b', 'with'),
+        (r'\bth\s+at\b', 'that'),
+        (r'\bth\s+is\b', 'this'),
+        (r'\bth\s+ey\b', 'they'),
+        (r'\bth\s+em\b', 'them'),
+        (r'\bth\s+en\b', 'then'),
+        (r'\bwh\s+en\b', 'when'),
+        (r'\bwh\s+at\b', 'what'),
+        (r'\bwh\s+o\b', 'who'),
+        (r'\bwh\s+ich\b', 'which'),
+        (r'\bha\s+ve\b', 'have'),
+        (r'\bha\s+s\b', 'has'),
+        (r'\bha\s+d\b', 'had'),
+        (r'\bca\s+n\b', 'can'),
+        (r'\bwi\s+ll\b', 'will'),
+        (r'\bwo\s+uld\b', 'would'),
+        (r'\bwi\s+th\b', 'with'),
+        (r'\bev\s+al\s*uating\b', 'evaluating'),
+        (r'\beval\s+uating\b', 'evaluating'),
+        (r'\bsitu\s+ation\b', 'situation'),
+        
         # === BUSINESS/FINANCE CORE TERMS ===
         (r'\bbusi?\s*ness\b', 'business'),
         (r'\bbus\s+iness\b', 'business'),
@@ -477,11 +552,24 @@ def _fix_broken_words(text: str) -> str:
         (r'\beffec\s*t\b', 'effect'),
     ]
     
+    # Fix spacing after common explanation labels (Run this FIRST to separate words)
+    text = re.sub(r'\b(SOURCE|Rationale|Answer|Note):([^\s])', r'\1: \2', text, flags=re.IGNORECASE)
+    # Fix broken "SOURCE" typically found
+    text = re.sub(r'\bSOURC\s*E\b', 'SOURCE', text)
+    text = re.sub(r'\bSOURCE\s+:\s*', 'SOURCE: ', text)
+
     for pattern, replacement in common_fixes:
-        text = re.sub(pattern, replacement, text, flags=re.IGNORECASE)
-        # Preserve case for capitalized versions
-        if replacement[0].isupper():
-            text = re.sub(pattern, replacement, text)
+        def preserve_case(m):
+            match_text = m.group(0)
+            # If original was ALL CAPS, make replacement ALL CAPS
+            if match_text.isupper():
+                return replacement.upper()
+            # If original was Capitalized, make replacement Capitalized
+            if match_text and match_text[0].isupper():
+                return replacement[0].upper() + replacement[1:]
+            return replacement
+            
+        text = re.sub(pattern, preserve_case, text, flags=re.IGNORECASE)
     
     # =========================================================================
     # 2. FIX HYPHENATION ISSUES (11k+ fixes)
@@ -496,10 +584,14 @@ def _fix_broken_words(text: str) -> str:
     # =========================================================================
     # 3. FIX PUNCTUATION SPACING (1.3k+ fixes)
     # =========================================================================
+    # Fix "word,word" -> "word, word"
+    text = re.sub(r'(\w),(\w)', r'\1, \2', text)
+    
     # Remove space before punctuation
     text = re.sub(r'\s+([.,;:!?])', r'\1', text)
     # Ensure space after punctuation (but not in URLs or numbers)
     text = re.sub(r'([.!?])([A-Z])', r'\1 \2', text)
+    
     
     # =========================================================================
     # 4. FIX DOUBLE/MULTIPLE SPACES
@@ -515,6 +607,11 @@ def _fix_broken_words(text: str) -> str:
     
     # Possessive 's followed by lowercase letter (need space)
     text = re.sub(r"(\w+)'s([a-z])", r"\1's \2", text)
+    
+    # Force capitalization after specific labels
+    def cap_after_label(m):
+        return m.group(1) + ": " + m.group(2).upper()
+    text = re.sub(r'\b(SOURCE|Rationale|Answer|Note):\s*([a-z])', cap_after_label, text, flags=re.IGNORECASE)
     
     # Contraction 't followed by lowercase letter (need space) - e.g., isn't, don't, won't
     text = re.sub(r"(\w+)'t([a-z])", r"\1't \2", text)
@@ -713,6 +810,228 @@ def _fix_broken_words(text: str) -> str:
         (r'\bcantr\s*y\b', 'can try'),
         (r'\bsinc\s*ey\b', 'since y'),
         (r'\bcall\s*y\b', 'cally'),  # Likely a name
+        
+        # === NEW: Fixes found from explanation spacing check ===
+        (r'\bnego\s*tiates\b', 'negotiates'),
+        (r'\bnego\s*tiate\b', 'negotiate'),
+        (r'\bnego\s*tiation\b', 'negotiation'),
+        (r'\bals\s*oallow\b', 'also allow'),
+        (r'\bals\s*o\b', 'also'),
+        (r'\ban\s*dsearch\b', 'and search'),
+        (r'\band\s*earch\b', 'and search'),
+        (r'\bpurchas\s*ing\b', 'purchasing'),
+        (r'\bpublish\s*ing\b', 'publishing'),
+        (r'\bresignati\s*on\b', 'resignation'),
+        
+        # Common run-on word fixes
+        (r'\bthey\s*als\s*o\b', 'they also'),
+        (r'\bwe\s*do\s*not\b', 'we do not'),
+        (r'\bwould\s*not\b', 'would not'),
+        (r'\bcould\s*not\b', 'could not'),
+        (r'\bshould\s*not\b', 'should not'),
+        (r'\bdoes\s*not\b', 'does not'),
+        (r'\bdid\s*not\b', 'did not'),
+        (r'\bwill\s*not\b', 'will not'),
+        (r'\bcan\s*not\b', 'cannot'),
+        
+        # Additional word splits from PDF extraction
+        (r'\bwhichs\s*/\s*he\b', 'which s/he'),
+        (r'\breprimand\s*orfire\b', 'reprimand or fire'),
+        (r'\borfire\b', 'or fire'),
+        
+        # === COMPREHENSIVE RUN-ON WORD FIXES (found in analysis) ===
+        # Words ending in ...the (run-on with 'the')
+        (r'\boutsi\s*dethe\b', 'outside the'),
+        (r'\binsi\s*dethe\b', 'inside the'),
+        (r'\bunderstandthe\b', 'understand the'),
+        (r'\bdeterminethe\b', 'determine the'),
+        (r'\bincreasethe\b', 'increase the'),
+        (r'\bdecreasethe\b', 'decrease the'),
+        (r'\bimprovethe\b', 'improve the'),
+        (r'\breducethe\b', 'reduce the'),
+        (r'\bachievethe\b', 'achieve the'),
+        (r'\breceivethe\b', 'receive the'),
+        (r'\bprovidethe\b', 'provide the'),
+        (r'\brequirethe\b', 'require the'),
+        (r'\bdescribethe\b', 'describe the'),
+        (r'\bfollowthe\b', 'follow the'),
+        (r'\benterthe\b', 'enter the'),
+        (r'\bexitthe\b', 'exit the'),
+        (r'\bwiththe\b', 'with the'),
+        (r'\bforthe\b', 'for the'),
+        (r'\bfromthe\b', 'from the'),
+        (r'\btothe\b', 'to the'),
+        (r'\bofthe\b', 'of the'),
+        (r'\binthe\b', 'in the'),
+        (r'\bonthe\b', 'on the'),
+        (r'\batthe\b', 'at the'),
+        (r'\bbythe\b', 'by the'),
+        (r'\basthe\b', 'as the'),
+        (r'\bandthe\b', 'and the'),
+        (r'\borthe\b', 'or the'),
+        (r'\bbutthe\b', 'but the'),
+        (r'\bifthe\b', 'if the'),
+        (r'\bwhenthe\b', 'when the'),
+        (r'\bwherethe\b', 'where the'),
+        (r'\bwhilethe\b', 'while the'),
+        (r'\bbeforethe\b', 'before the'),
+        (r'\bafterthe\b', 'after the'),
+        (r'\baboutthe\b', 'about the'),
+        (r'\bacrossthe\b', 'across the'),
+        (r'\bagainstthe\b', 'against the'),
+        (r'\bduringthe\b', 'during the'),
+        (r'\bbetweenthe\b', 'between the'),
+        (r'\bthroughthe\b', 'through the'),
+        (r'\bunderthe\b', 'under the'),
+        (r'\boverthe\b', 'over the'),
+        (r'\bintothea\b', 'into the'),
+        
+        # More run-on fixes
+        (r'\bthe\s*re\b', 'there'),
+        (r'\bmo\s*re\b', 'more'),
+        (r'\bwhe\s*re\b', 'where'),
+        (r'\bthe\s*se\b', 'these'),
+        (r'\bthe\s*ir\b', 'their'),
+        (r'\bthe\s*y\b', 'they'),
+        (r'\bthe\s*m\b', 'them'),
+        (r'\bthe\s*n\b', 'then'),
+        (r'\bwhe\s*n\b', 'when'),
+        (r'\bwhi\s*ch\b', 'which'),
+        (r'\bwit\s*h\b', 'with'),
+        (r'\bth\s*at\b', 'that'),
+        (r'\bth\s*is\b', 'this'),
+        (r'\bfro\s*m\b', 'from'),
+        (r'\bint\s*o\b', 'into'),
+        (r'\bont\s*o\b', 'onto'),
+        (r'\bont\s*o\b', 'onto'),
+        (r'\babo\s*ut\b', 'about'),
+        
+        # Explanation specific run-ons
+        (r'\b([a-z])The\b', r'\1 The'),
+        (r'\b([a-z])This\b', r'\1 This'),
+        (r'\b([a-z])It\b', r'\1 It'),
+        (r'\b([a-z])If\b', r'\1 If'),
+        (r'\b([a-z])When\b', r'\1 When'),
+        (r'\b([a-z])However\b', r'\1 However'),
+        (r'\b([a-z])Therefore\b', r'\1 Therefore'),
+        (r'\b([a-z])For\b', r'\1 For'),
+        (r'\b([a-z])As\b', r'\1 As'),
+        
+        # -ation split fixes
+        (r'\borganiz\s*ation\b', 'organization'),
+        (r'\binform\s*ation\b', 'information'),
+        (r'\bcommuni\s*cation\b', 'communication'),
+        (r'\bpresent\s*ation\b', 'presentation'),
+        (r'\bdocument\s*ation\b', 'documentation'),
+        (r'\bimplementa\s*tion\b', 'implementation'),
+        (r'\bregistr\s*ation\b', 'registration'),
+        (r'\bconsider\s*ation\b', 'consideration'),
+        (r'\bevalua\s*tion\b', 'evaluation'),
+        (r'\bnegocia\s*tion\b', 'negotiation'),
+        (r'\bnegocia\s*tions\b', 'negotiations'),
+        (r'\bdemonstrat\s*ion\b', 'demonstration'),
+        (r'\bcompensa\s*tion\b', 'compensation'),
+        (r'\btransport\s*ation\b', 'transportation'),
+        (r'\bclassifica\s*tion\b', 'classification'),
+        (r'\brecommend\s*ation\b', 'recommendation'),
+        (r'\bexplana\s*tion\b', 'explanation'),
+        
+        # -ating split fixes
+        (r'\bdemonstrat\s*ing\b', 'demonstrating'),
+        (r'\bparticipat\s*ing\b', 'participating'),
+        (r'\bcommunicat\s*ing\b', 'communicating'),
+        (r'\bnegotiat\s*ing\b', 'negotiating'),
+        (r'\boperating\b', 'operating'),
+        (r'\breveal\s*ing\b', 'revealing'),
+        (r'\bincorporat\s*ing\b', 'incorporating'),
+        (r'\billustr\s*ating\b', 'illustrating'),
+        
+        # -ment split fixes
+        (r'\bmanage\s*ment\b', 'management'),
+        (r'\bdevelop\s*ment\b', 'development'),
+        (r'\benviron\s*ment\b', 'environment'),
+        (r'\bequip\s*ment\b', 'equipment'),
+        (r'\bdocu\s*ment\b', 'document'),
+        (r'\bstate\s*ment\b', 'statement'),
+        (r'\binvest\s*ment\b', 'investment'),
+        (r'\brequire\s*ment\b', 'requirement'),
+        (r'\bachieve\s*ment\b', 'achievement'),
+        (r'\bemploy\s*ment\b', 'employment'),
+        (r'\bassess\s*ment\b', 'assessment'),
+        (r'\badvance\s*ment\b', 'advancement'),
+        (r'\bagree\s*ment\b', 'agreement'),
+        (r'\bpay\s*ment\b', 'payment'),
+        (r'\bship\s*ment\b', 'shipment'),
+        (r'\btreat\s*ment\b', 'treatment'),
+        (r'\bdepart\s*ment\b', 'department'),
+        (r'\breplace\s*ment\b', 'replacement'),
+        (r'\bsettle\s*ment\b', 'settlement'),
+        
+        # -ness split fixes
+        (r'\bbusi\s*ness\b', 'business'),
+        (r'\baware\s*ness\b', 'awareness'),
+        (r'\beffective\s*ness\b', 'effectiveness'),
+        (r'\bwilling\s*ness\b', 'willingness'),
+        (r'\bfair\s*ness\b', 'fairness'),
+        (r'\bweak\s*ness\b', 'weakness'),
+        (r'\bopen\s*ness\b', 'openness'),
+        (r'\bhappy\s*ness\b', 'happiness'),
+        (r'\breadiness\b', 'readiness'),
+        
+        # -ity split fixes  
+        (r'\bresponsibil\s*ity\b', 'responsibility'),
+        (r'\bopportun\s*ity\b', 'opportunity'),
+        (r'\bactiv\s*ity\b', 'activity'),
+        (r'\bqual\s*ity\b', 'quality'),
+        (r'\bquant\s*ity\b', 'quantity'),
+        (r'\babil\s*ity\b', 'ability'),
+        (r'\bsecur\s*ity\b', 'security'),
+        (r'\bauthor\s*ity\b', 'authority'),
+        (r'\bcommun\s*ity\b', 'community'),
+        (r'\bperson\s*ality\b', 'personality'),
+        (r'\bflex\s*ibility\b', 'flexibility'),
+        
+        # -ally split fixes
+        (r'\bbasic\s*ally\b', 'basically'),
+        (r'\bessential\s*ly\b', 'essentially'),
+        (r'\bprofession\s*ally\b', 'professionally'),
+        (r'\bperson\s*ally\b', 'personally'),
+        (r'\bfinanci\s*ally\b', 'financially'),
+        (r'\btypic\s*ally\b', 'typically'),
+        (r'\bspecific\s*ally\b', 'specifically'),
+        (r'\belectric\s*ally\b', 'electrically'),
+        
+        # youwill and similar
+        (r'\byouwill\b', 'you will'),
+        (r'\byoucan\b', 'you can'),
+        (r'\byoumay\b', 'you may'),
+        (r'\byoumight\b', 'you might'),
+        (r'\byoushould\b', 'you should'),
+        (r'\byouwould\b', 'you would'),
+        (r'\byoucould\b', 'you could'),
+        (r'\byouhave\b', 'you have'),
+        (r'\byouare\b', 'you are'),
+        (r'\btheywill\b', 'they will'),
+        (r'\btheycan\b', 'they can'),
+        (r'\btheymay\b', 'they may'),
+        (r'\btheyhave\b', 'they have'),
+        (r'\btheyare\b', 'they are'),
+        (r'\bwewill\b', 'we will'),
+        (r'\bwecan\b', 'we can'),
+        (r'\bwemay\b', 'we may'),
+        (r'\bwehave\b', 'we have'),
+        (r'\bweare\b', 'we are'),
+        (r'\bitwill\b', 'it will'),
+        (r'\bitcan\b', 'it can'),
+        (r'\bitmay\b', 'it may'),
+        (r'\bitis\b', 'it is'),
+        (r'\bitwas\b', 'it was'),
+        
+        # preventrisk and similar compound errors
+        (r'\bpreventrisk\b', 'prevent risk'),
+        
+        # Space after hyphen fix (word- something -> word-something)
+        (r'(\w)-\s+(\w)', r'\1-\2'),
     ]
     
     for pattern, replacement in additional_fixes:
@@ -755,11 +1074,34 @@ def _fix_broken_words(text: str) -> str:
     text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})\b', merge_suffix_careful, text)
     
     # =========================================================================
-    # 6. FINAL CLEANUP
+    # 6. UNIVERSAL FALLBACK: Catch remaining run-on patterns
+    # =========================================================================
+    # Catch any word ending in 'the' that should be 'word the'
+    # But exclude actual words ending in 'the' like 'breathe', 'loathe', 'clothe'
+    real_the_words = {'breathe', 'loathe', 'clothe', 'soothe', 'bathe', 'tithe', 'scythe', 'writhe', 'blithe'}
+    
+    def split_wordthe(match):
+        word = match.group(0)
+        if word.lower() in real_the_words:
+            return word
+        # Split before 'the'
+        base = word[:-3]
+        if len(base) >= 2:  # Only split if base word is at least 2 chars
+            return base + ' the'
+        return word
+    
+    text = re.sub(r'\b[a-zA-Z]{4,}the\b', split_wordthe, text, flags=re.IGNORECASE)
+    
+    # =========================================================================
+    # 7. FINAL CLEANUP
     # =========================================================================
     # One more pass for double spaces that may have been created
     text = re.sub(r'\s{2,}', ' ', text)
     
+    # Final cleanup for specific edge cases (Must be last)
+    text = re.sub(r'SOURCE:\s*Http', 'SOURCE: http', text)
+    text = re.sub(r'Note:\s*this', 'Note: This', text, flags=re.IGNORECASE)
+
     return text.strip()
 
 
@@ -848,23 +1190,37 @@ def _parse_answer_key(lines: List[str]) -> Dict[int, Dict[str, str]]:
 def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Dict[str, Any]]:
     questions = []
     current_q = None
+    last_q_num = 0
     
+    # Enhanced regex patterns
     q_start_re = re.compile(r"^(\d{1,3})\s*[).:\-]\s+(.*)")
-    opt_start_re = re.compile(r"^\s*([A-E])\s*[).:\-]\s*(.*)")
-    inline_opt_re = re.compile(r"(?<!\w)([A-E])\s*[).:\-]\s+")
+    # Allow (A) or A) or A. - Ensures letter is always in group 1
+    # CHANGED: \s* instead of \s+ for the content part to handle 'A.Text'
+    opt_start_re = re.compile(r"^\s*\(?([A-E])(?:[).:\-]|\))\s*(.*)")
+    # Inline options: (A) ... (B) ... - Ensures letter is always in group 1
+    inline_opt_re = re.compile(r"(?:\s{2,}|\s+)\(?([A-E])(?:[).:\-]|\))\s*")
+    
+    answer_key_entry_re = re.compile(r"^(\d{1,3})\s*[).:\-]\s*([A-E])\s*$", re.IGNORECASE)
 
     def finalize_current():
-        nonlocal current_q
+        nonlocal current_q, last_q_num
         if current_q:
             # First normalize standard whitespace
             prompt = _normalize_whitespace(current_q["prompt"])
             # Then fix broken word splits
             current_q["prompt"] = _fix_broken_words(prompt)
             
+            # Clean up options
+            cleaned_opts = []
             for opt in current_q["options"]:
                 text = _normalize_whitespace(opt["text"])
-                opt["text"] = _fix_broken_words(text)
+                text = _fix_broken_words(text)
+                cleaned_opts.append({"label": opt["label"], "text": text})
+            current_q["options"] = cleaned_opts
+            
+            # Ensure we have a valid question number
             questions.append(current_q)
+            last_q_num = current_q["number"]
         current_q = None
 
     i = 0
@@ -872,19 +1228,35 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         line = lines[i]
         i += 1
         
-        
+        # Stop at explicit answer key header
         if line.lower().strip() == "answer key":
              break
-
         
+        # Stop if we hit answer key entries (e.g., "1. A" with nothing else)
+        if answer_key_entry_re.match(line):
+            # Check if next few lines also look like answer key entries
+            is_answer_key = True
+            for j in range(i, min(i + 3, len(lines))):
+                if not answer_key_entry_re.match(lines[j]) and lines[j].strip():
+                    is_answer_key = False
+                    break
+            if is_answer_key and last_q_num >= 50:  # Only if we're decently far into the test
+                break
+
         q_match = q_start_re.match(line)
         if q_match:
             num = int(q_match.group(1))
             if not (1 <= num <= 100):
+                # If number is crazy high, probably not a question
+                # But if it's close to expected, might be valid
+                pass
+            
+            text = q_match.group(2).strip()
+            # Skip if this looks like an answer key entry
+            if re.match(r"^[A-E]$", text, re.IGNORECASE):
                 continue
                 
             finalize_current()
-            text = q_match.group(2)
             current_q = {
                 "number": num,
                 "prompt": text,
@@ -892,75 +1264,134 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
             }
             continue
 
-        
         opt_match = opt_start_re.match(line)
         if opt_match:
             label = opt_match.group(1).upper()
             text = opt_match.group(2)
             
-            
+            # If option text is empty, check next line
             if not text.strip() and i < len(lines):
-                 
                  next_line = lines[i]
-                 
                  if not opt_start_re.match(next_line) and not q_start_re.match(next_line):
                       text = next_line
                       i += 1
             
-            
-            
+            # Handle orphan option A - implies we missed the question start
             if current_q and label == "A" and any(o["label"] == "A" for o in current_q["options"]):
+                # We already have an A, so this must be a new question
                 prev_num = current_q["number"]
                 finalize_current()
                 
+                # Infer the new question number
+                new_num = prev_num + 1
                 current_q = {
-                    "number": prev_num + 1,
-                    "prompt": "[Prompt text missing from PDF]",
+                    "number": new_num,
+                    "prompt": "[Prompt text missing/merged]",
                     "options": []
                 }
             
             if not current_q:
-                
-                
-                if label == "A" and not questions:
+                # Starting fresh with an option but no question context
+                if label == "A":
+                    inferred_num = last_q_num + 1 if last_q_num > 0 else 1
                     current_q = {
-                        "number": 1,
-                        "prompt": "[Question prompt missing from PDF text]",
+                        "number": inferred_num,
+                        "prompt": "[Prompt text missing/merged]",
                         "options": []
                     }
                 else:
-                    
-                    continue
+                    # Non-A option without context - try to attach to previous question if it exists in list
+                    if questions and questions[-1]["options"] and questions[-1]["options"][-1]["label"] < label:
+                         # Re-open last question
+                         current_q = questions.pop()
+                         last_q_num = current_q["number"] - 1 # Reset last_q_num temporarily
+                    else:
+                        continue
 
             current_q["options"].append({"label": label, "text": text})
             
+            # ---------------------------------------------------------
+            # Handle inline options (e.g. "A. Text B. Text ...")
+            # ---------------------------------------------------------
+            # We want to split by pattern " (B) " or " B. "
+            # Our regex finds the *separators*.
             
-            split_iter = list(inline_opt_re.finditer(text))
-            if split_iter:
-                full_text = text
+            # We already have the first part (label A + text).
+            # Now check if that 'text' contains subsequent options.
+            
+            def split_inline_options(full_text):
+                # Find all occurrences of option patterns
+                matches = list(inline_opt_re.finditer(full_text))
+                if not matches:
+                    return None
                 
-                parts = re.split(inline_opt_re, full_text)
-                current_q["options"][-1]["text"] = parts[0]
+                parts = []
+                last_end = 0
                 
-                idx = 1
-                while idx < len(parts) - 1:
-                    lbl = parts[idx].strip().upper()
-                    val = parts[idx+1].strip()
+                # First chunk matches the initial option text (from opt_match)
+                # But wait, opt_match group(2) includes EVERYTHING after "A. "
+                
+                for idx, m in enumerate(matches):
+                    # Text before this match is the content of the previous option
+                    content = full_text[last_end:m.start()].strip()
+                    parts.append(content)
+                    
+                    # Next label
+                    lbl = m.group(1).upper()
+                    if idx == len(matches) - 1:
+                        # Last match, content is everything after
+                        content = full_text[m.end():].strip()
+                        parts.append((lbl, content))
+                    else:
+                        # Store label to pair with next content
+                        parts.append((lbl, None)) # Placeholder
+                        
+                    last_end = m.end()
+                
+                # If we had matches, we need to reconstruct
+                # The first 'part' belongs to the option we are currently processing (e.g. A)
+                # The subsequent parts are new options (B, C, ...)
+                return parts
+
+            # Attempt to split the text we just found
+            # Note: opt_match gave us the text for the current label
+            inline_parts = []
+            
+            # Iterate to find hidden options
+            cursor = 0
+            # Look for " B. " or " (B) " inside text
+            found_split = False
+            
+            # Special logic: The text might contain "B. something".
+            
+            found_opts = list(inline_opt_re.finditer(text))
+            if found_opts:
+                # The text for the *current* extracted option (e.g. A) ends at the start of the next option
+                first_opt_text = text[:found_opts[0].start()].strip()
+                current_q["options"][-1]["text"] = first_opt_text
+                
+                # Now add the others
+                for j, m in enumerate(found_opts):
+                    lbl = m.group(1).upper()
+                    
+                    # Content is from end of this match to start of next match (or end of string)
+                    start_content = m.end()
+                    if j < len(found_opts) - 1:
+                        end_content = found_opts[j+1].start()
+                    else:
+                        end_content = len(text)
+                    
+                    val = text[start_content:end_content].strip()
                     current_q["options"].append({"label": lbl, "text": val})
-                    idx += 2
+            
             continue
 
+        # Continuation line - append to current context
         if current_q:
             if current_q["options"]:
-                if re.match(r"^\d{1,3}\.", line):
-                    finalize_current()
-                    q_match_retry = q_start_re.match(line)
-                    if q_match_retry:
-                         num = int(q_match_retry.group(1))
-                         text = q_match_retry.group(2)
-                         current_q = {"number": num, "prompt": text, "options": []}
-                    continue
-    
+                # Check if this line is actually a new question start that regex missed?
+                # e.g. "12. " without text? No, regex handles that.
+                # Just append to last option
                 current_q["options"][-1]["text"] += " " + line
             else:
                 current_q["prompt"] += " " + line
@@ -974,66 +1405,65 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         num = q["number"]
         if num in seen_ids: continue
         
-        
+        # Sort options by label
         q["options"].sort(key=lambda x: x["label"])
         
-        
+        # Ensure we have A, B, C, D
         labels = [o["label"] for o in q["options"]]
         if labels:
-            
-            expected_labels = ['A','B','C','D','E']
-            
-            max_idx = -1
-            for l in labels:
-                if l in expected_labels:
-                    max_idx = max(max_idx, expected_labels.index(l))
-            
-            
-            
-            
-            target_count = max(4, max_idx + 1)
+            expected_labels = ['A','B','C','D']
             
             new_options = []
             current_src_idx = 0
+            
+            # We want to fill exactly 4 slots if possible, or more if E exists
+            # Find max label present to know how far to go
+            max_label_idx = 3 # Default to D
+            for l in labels:
+                if l in expected_labels:
+                    max_label_idx = max(max_label_idx, expected_labels.index(l))
+                elif l == 'E':
+                    max_label_idx = max(max_label_idx, 4)
+
+            target_count = max(4, max_label_idx + 1)
+            
+            # Filter valid options
+            valid_src_options = {o["label"]: o for o in q["options"]}
+            
+            final_opt_list = []
             for i in range(target_count):
-                exp_label = expected_labels[i]
-                if current_src_idx < len(q["options"]) and q["options"][current_src_idx]["label"] == exp_label:
-                    new_options.append(q["options"][current_src_idx])
-                    current_src_idx += 1
+                if i < len(expected_labels):
+                    lbl = expected_labels[i]
                 else:
-                    
-                    new_options.append({"label": exp_label, "text": "[Option missing from PDF]"})
+                    lbl = chr(ord('A') + i)
+                
+                if lbl in valid_src_options:
+                    final_opt_list.append(valid_src_options[lbl]["text"])
+                else:
+                    final_opt_list.append("[Option missing from PDF]")
             
-            q["options"] = new_options
         else:
-            
-            q["options"] = [{"label": l, "text": "[Option missing]"} for l in "ABCD"]
+            final_opt_list = ["[Option missing]" for _ in "ABCD"]
         
+        # Answer matching
         ans_data = answers.get(num)
         ans_letter = ans_data["letter"] if ans_data else None
         explanation = ans_data["explanation"] if ans_data else ""
         
-        correct_idx = None
+        correct_idx = -1
         if ans_letter:
-            for i, opt in enumerate(q["options"]):
-                if opt["label"] == ans_letter:
-                    correct_idx = i
-                    break
-        
-        if correct_idx is None and ans_letter:
-            idx_guess = ord(ans_letter) - ord('A')
-            if 0 <= idx_guess < 5:
-                if idx_guess < len(q["options"]):
-                    correct_idx = idx_guess
-        
+            # Map letter to index 0-3
+            if len(ans_letter) == 1 and 'A' <= ans_letter <= 'E':
+                 correct_idx = ord(ans_letter) - ord('A')
+                 
         q_id = f"q-{num}"
         
         final_questions.append({
             "id": q_id,
             "number": num,
             "question": q["prompt"],
-            "options": [o["text"] for o in q["options"]],
-            "correct_index": correct_idx if correct_idx is not None else -1,
+            "options": final_opt_list,
+            "correct_index": correct_idx,
             "correct_letter": ans_letter if ans_letter else "?",
             "explanation": explanation if explanation else "No explanation available (Parse failed)"
         })
