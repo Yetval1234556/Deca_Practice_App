@@ -392,7 +392,16 @@ async function handleUpload() {
             credentials: "same-origin",
         });
 
-        const data = await res.json().catch(() => null);
+        let data;
+        try {
+            data = await res.json();
+        } catch (e) {
+            console.error("Non-JSON response", e);
+            // Try to read text to show user what happened
+            const text = await res.text().catch(() => null);
+            throw new Error(text ? `Server error: ${text.substring(0, 100)}...` : "Upload failed (Invalid response).");
+        }
+
         if (!res.ok || !data) {
             throw new Error((data && (data.description || data.error || data.message)) || "Upload failed.");
         }

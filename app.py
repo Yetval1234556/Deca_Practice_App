@@ -1760,5 +1760,14 @@ def handle_exception(e):
         "message": e.description,
     }), e.code
 
+@app.errorhandler(Exception)
+def handle_generic_exception(e):
+    """Return JSON for all unhandled exceptions."""
+    app.logger.error(f"Unhandled exception: {e}", exc_info=True)
+    return jsonify({
+        "error": "Internal Server Error",
+        "message": str(e),
+    }), 500
+
 if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
