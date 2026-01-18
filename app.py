@@ -55,25 +55,23 @@ SESSION_CLEANUP_AGE_SECONDS = 86400
 
 # --- Logging Configuration ---
 import logging
+import sys
+
 # Suppress default Flask/Werkzeug access logs (e.g. "GET / ... 200")
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-# Configure app logger
-# Ensure instance dir exists for logs
-INSTANCE_DIR.mkdir(parents=True, exist_ok=True)
-LOG_FILE = INSTANCE_DIR / "activity.log"
-
-logging.basicConfig(level=logging.WARNING, format='%(asctime)s - %(levelname)s - %(message)s')
+# Configure app logger to output to Console (StreamHandler)
+# This ensures logs are visible in the platform dashboard and avoids filesystem issues
+logging.basicConfig(
+    level=logging.WARNING, 
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO) # Capture INFO for activity tracking
-
-# File Handler (Persistent Logs)
-from logging.handlers import RotatingFileHandler
-file_handler = RotatingFileHandler(LOG_FILE, maxBytes=10*1024*1024, backupCount=5)
-file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-file_handler.setLevel(logging.INFO)
-logger.addHandler(file_handler)
+logger.setLevel(logging.INFO) # Capture INFO for activity tracking (New User, Uploads, etc.)
 
 # Ensure DB is in a writable location
 DB_PATH = SESSION_DATA_DIR / "sessions.db"
