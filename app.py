@@ -135,14 +135,24 @@ def _normalize_whitespace(text: str) -> str:
 def _strip_leading_number(text: str) -> str:
     return re.sub(r"^\s*(?:\d{1,3}[).:\-]|[A-E][).:\-])\s*", "", text).strip()
 
+def _get_client_ip():
+    """Reliably get the client's real IP address, handling proxies."""
+    if not request: return "0.0.0.0"
+    
+    # Check X-Forwarded-For first (standard for proxies)
+    x_forwarded = request.headers.get("X-Forwarded-For")
+    if x_forwarded:
+        # The first IP in the list is the original client
+        return x_forwarded.split(",")[0].strip()
+    
+    # Fallback to other headers if needed, or remote_addr
+    return request.headers.get("X-Real-IP", request.remote_addr)
+
 @app.before_request
 def track_active_user():
     try:
-        # Support for proxies (Koyeb/Heroku/etc)
-        # request.access_route[0] or X-Forwarded-For usually contains the real IP
-        ip = request.headers.get("X-Forwarded-For", request.remote_addr)
-        if ip and "," in ip:
-            ip = ip.split(",")[0].strip()
+        # Use valid IP extraction
+        ip = _get_client_ip()
             
         if ip:
             ua = request.headers.get("User-Agent", "Unknown")
@@ -1786,7 +1796,7 @@ def start_quiz(test_id):
     mode = payload.get("mode", "regular")
     
     # Log activity
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr)
+    ip = _get_client_ip()
     logger.info(f"TEST STARTED: {test_id} | Mode: {mode} | IP: {ip}")
 
     count = payload.get("count")
@@ -1827,7 +1837,7 @@ def upload_pdf():
     f = request.files.get("file")
     if not f: abort(400, "No file")
 
-    logger.info(f"TEST UPLOADED: {f.filename} | IP: {request.remote_addr}")
+    logger.info(f"TEST UPLOADED: {f.filename} | IP: {_get_client_ip()}")
     
     raw = f.read()
     if len(raw) > MAX_UPLOAD_BYTES:
