@@ -9,8 +9,7 @@ import shutil
 import concurrent.futures
 import time
 import sqlite3
-import hashlib
-from functools import lru_cache
+import copy
 from pathlib import Path
 
 from typing import Dict, List, Any, Optional, IO
@@ -1793,7 +1792,7 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
             mtime = source.stat().st_mtime
             cache_key = f"{source}:{mtime}"
             if cache_key in _pdf_cache:
-                return _pdf_cache[cache_key]
+                return copy.deepcopy(_pdf_cache[cache_key])
         except:
             pass
     
@@ -1824,7 +1823,7 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
         if cache_key:
             _pdf_cache[cache_key] = result
             
-        return result
+        return copy.deepcopy(result)
     except Exception as e:
 
         
