@@ -400,12 +400,118 @@ def _extract_clean_lines(source: Path | IO[bytes]) -> List[str]:
 
 
 COMMON_FIXES_RAW = [
+    # === CRITICAL: Single letter + common word = fix ===
+    # These patterns fix cases like "h as" -> "has" where the first letter got separated
+    (r'\bh\s+as\b', 'has'),
+    (r'\bw\s+as\b', 'was'),
+    (r'\bh\s+is\b', 'his'),
+    (r'\bh\s+er\b', 'her'),
+    (r'\bh\s+im\b', 'him'),
+    (r'\bh\s+ad\b', 'had'),
+    (r'\bh\s+ave\b', 'have'),
+    (r'\bh\s+ow\b', 'how'),
+    (r'\bw\s+ho\b', 'who'),
+    (r'\bw\s+hy\b', 'why'),
+    (r'\bw\s+ay\b', 'way'),
+    (r'\bw\s+ill\b', 'will'),
+    (r'\bw\s+ere\b', 'were'),
+    (r'\bw\s+ould\b', 'would'),
+    (r'\bw\s+ant\b', 'want'),
+    (r'\bw\s+hen\b', 'when'),
+    (r'\bw\s+hat\b', 'what'),
+    (r'\bw\s+here\b', 'where'),
+    (r'\bt\s+he\b', 'the'),
+    (r'\bt\s+his\b', 'this'),
+    (r'\bt\s+hat\b', 'that'),
+    (r'\bt\s+hen\b', 'then'),
+    (r'\bt\s+hey\b', 'they'),
+    (r'\bt\s+hem\b', 'them'),
+    (r'\bt\s+here\b', 'there'),
+    (r'\bt\s+hose\b', 'those'),
+    (r'\bt\s+heir\b', 'their'),
+    
+    # === ADDITIONAL PATTERN FIXES (from analysis) ===
+    (r'\brece\s+ives?\b', 'receives'),
+    (r'\bbenef\s+its?\b', 'benefits'),
+    (r'\bbenef\s+it\b', 'benefit'),
+    (r'\bcom\s+pany\b', 'company'),
+    (r'\bpro\s+duct\b', 'product'),
+    (r'\bser\s+vice\b', 'service'),
+    (r'\bcus\s+tomer\b', 'customer'),
+    (r'\bman\s+age\b', 'manage'),
+    (r'\bpro\s+vide\b', 'provide'),
+    
+    # === CAPITAL LETTER SPLITS (most common from analysis) ===
+    # Words ending in -it that get split with capital I
+    (r'\bbenef\s*[Ii]t\b', 'benefit'),
+    (r'\bbenef\s*[Ii]ts\b', 'benefits'),
+    (r'\bcred\s*[Ii]t\b', 'credit'),
+    (r'\bcred\s*[Ii]ts\b', 'credits'),
+    (r'\btrans\s*[Ii]t\b', 'transit'),
+    (r'\bsubm\s*[Ii]t\b', 'submit'),
+    (r'\bsubm\s*[Ii]ts\b', 'submits'),
+    (r'\bprof\s*[Ii]t\b', 'profit'),
+    (r'\bprof\s*[Ii]ts\b', 'profits'),
+    (r'\blim\s*[Ii]t\b', 'limit'),
+    (r'\blim\s*[Ii]ts\b', 'limits'),
+    (r'\baud\s*[Ii]t\b', 'audit'),
+    (r'\baud\s*[Ii]ts\b', 'audits'),
+    (r'\bdepos\s*[Ii]t\b', 'deposit'),
+    (r'\bdepos\s*[Ii]ts\b', 'deposits'),
+    (r'\bexh\s*[Ii]b\s*[Ii]t\b', 'exhibit'),
+    (r'\bperm\s*[Ii]t\b', 'permit'),
+    (r'\bperm\s*[Ii]ts\b', 'permits'),
+    (r'\bun\s*[Ii]t\b', 'unit'),
+    (r'\bun\s*[Ii]ts\b', 'units'),
+    (r'\bexpl\s*[Ii]c\s*[Ii]t\b', 'explicit'),
+    
+    # Words ending in -as that get split with capital A
+    (r'\bpurch\s*[Aa]s\b', 'purchase'),  
+    (r'\bpurch\s*[Aa]ses\b', 'purchases'),
+    (r'\bextr\s*[Aa]s\b', 'extras'),
+    (r'\bextr\s*[Aa]\b', 'extra'),
+    (r'\bide\s*[Aa]s\b', 'ideas'),
+    (r'\bare\s*[Aa]s\b', 'areas'),
+    (r'\brele\s*[Aa]s\b', 'release'),
+    (r'\brele\s*[Aa]ses\b', 'releases'),
+    
+    # Other common capital letter splits
+    (r'\b[Rr]etrieved\s+[Aa]ugust\b', 'Retrieved August'),
+    (r'\betrieved\s+[Aa]ugust\b', 'Retrieved August'),
+    (r'\bengage\s+[Ll]earning\b', 'Engage Learning'),
+    (r'\bonsumer\s+[Pp]roduct\b', 'Consumer Product'),
+    (r'\bwith\s*[Ii]n\b', 'within'),
+    (r'\bwith\s*[Oo]ut\b', 'without'),
+    
+    # -ity splits with capital letters  
+    (r'\bquant\s*[Ii]ty\b', 'quantity'),
+    (r'\bqual\s*[Ii]ty\b', 'quality'),
+    (r'\babil\s*[Ii]ty\b', 'ability'),
+    (r'\bliabil\s*[Ii]ty\b', 'liability'),
+    (r'\bpersonal\s*[Ii]ty\b', 'personality'),
+    (r'\bcapabil\s*[Ii]ty\b', 'capability'),
+    (r'\bactiv\s*[Ii]ty\b', 'activity'),
+    (r'\bactiv\s*[Ii]ties\b', 'activities'),
+    (r'\bopportun\s*[Ii]ty\b', 'opportunity'),
+    (r'\butil\s*[Ii]ty\b', 'utility'),
+    
+    # -er/-or splits
+    (r'\bcustom\s*[Ee]r\b', 'customer'),
+    (r'\bcustom\s*[Ee]rs\b', 'customers'),
+    (r'\bmanag\s*[Ee]r\b', 'manager'),
+    (r'\bmanag\s*[Ee]rs\b', 'managers'),
+    (r'\bemploy\s*[Ee]r\b', 'employer'),
+    (r'\bemploy\s*[Ee]rs\b', 'employers'),
+    (r'\binvest\s*[Oo]r\b', 'investor'),
+    (r'\binvest\s*[Oo]rs\b', 'investors'),
+    
     # === CRITICAL EDGE CASES: Short word splits ===
     # These happen when common words get split at unusual points
     (r'\ba\s+nd\b', 'and'),
     (r'\ba\s+ndthe\b', 'and the'),
     (r'\ba\s+s\b', 'as'),  # Only when followed by space
     (r'\bo\s+f\b', 'of'),
+
     (r'\bo\s+n\b', 'on'),
     (r'\bo\s+r\b', 'or'),
     (r'\bi\s+n\b', 'in'),
@@ -950,16 +1056,22 @@ ADDITIONAL_FIXES_RAW = [
     (r'\babo\s*ut\b', 'about'),
     
     # Explanation specific run-ons
-    (r'\b([a-z])The\b', r'\1 The'),
-    (r'\b([a-z])This\b', r'\1 This'),
-    (r'\b([a-z])It\b', r'\1 It'),
-    (r'\b([a-z])If\b', r'\1 If'),
-    (r'\b([a-z])When\b', r'\1 When'),
-    (r'\b([a-z])However\b', r'\1 However'),
-    (r'\b([a-z])Therefore\b', r'\1 Therefore'),
-    (r'\b([a-z])For\b', r'\1 For'),
-    (r'\b([a-z])As\b', r'\1 As'),
+    # FIXED: Use negative lookbehind to avoid breaking words like credit, profit, limit, benefit
+    # These patterns should ONLY match true run-ons (e.g., "companyThe", "businessIt")
+    # NOT valid words that just happen to end with these letters
+    (r'\b([a-z]{3,})(?<!cred)(?<!prof)(?<!lim)(?<!benef)(?<!subm)(?<!aud)(?<!depos)(?<!perm)(?<!un)(?<!exh)(?<!trans)The\b', r'\1 The'),
+    (r'\b([a-z]{3,})(?<!cred)(?<!prof)(?<!lim)(?<!benef)(?<!subm)(?<!aud)(?<!depos)(?<!perm)(?<!un)(?<!exh)(?<!trans)This\b', r'\1 This'),
+    # REMOVED: These patterns break too many valid words like credit, profit, limit
+    # (r'\b([a-z]{3,})It\b', r'\1 It'),  
+    # (r'\b([a-z]{3,})If\b', r'\1 If'),
+    (r'\b([a-z]{3,})(?<!cred)(?<!prof)(?<!lim)(?<!benef)(?<!subm)When\b', r'\1 When'),
+    (r'\b([a-z]{3,})However\b', r'\1 However'),
+    (r'\b([a-z]{3,})Therefore\b', r'\1 Therefore'),
+    (r'\b([a-z]{3,})(?<!cred)(?<!prof)For\b', r'\1 For'),
+    # REMOVED: Pattern for 'As' breaks words like purchase, release
+    # (r'\b([a-z]{3,})As\b', r'\1 As'),
     
+
     # -ation split fixes
     (r'\borganiz\s*ation\b', 'organization'),
     (r'\binform\s*ation\b', 'information'),
@@ -1206,9 +1318,41 @@ def _fix_broken_words(text: str) -> str:
             if s.lower() not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'h', 'k', 'p', 'g', 'm'}: 
                 return match.group(0)
         return w + s
+    
+    # FIXED: Don't merge single letters that commonly START words like has/was/his/her
+    # Check what follows the pattern - if it forms a common word, don't merge
+    common_word_starts = {
+        'h': {'as', 'is', 'er', 'im', 'ad', 'ave', 'ow', 'ere', 'eld'},  # has, his, her, him, had, have, how, here, held
+        'w': {'as', 'ith', 'ill', 'ere', 'hy', 'hen', 'hat', 'ho', 'ay', 'ould', 'ant'},  # was, with, will, were, why, when, what, who, way, would, want
+        't': {'he', 'his', 'hat', 'hen', 'hey', 'hem', 'here', 'hose', 'hus', 'heir'},  # the, this, that, then, they, them, there, those, thus, their
+    }
+    
+    def merge_suffix_smart(match):
+        w, s = match.group(1), match.group(2)
+        full_text = match.group(0)
+        
+        if s.lower() in valid_short: 
+            return full_text
+        # Don't merge with answer options A-E
+        if s in {'A','B','C','D','E'}: 
+            return full_text
+            
+        # For single char suffixes, check if it could start a common word
+        if len(s) == 1:
+            letter = s.lower()
+            # Check if this letter starts common words - if so, DON'T merge
+            if letter in common_word_starts:
+                # Don't merge - this single letter likely starts a word like "has", "was", "the"
+                return full_text
+            # Only merge known safe word-ending characters
+            if letter not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'k', 'p', 'g', 'm'}: 
+                return full_text
+        return w + s
 
     # Merge 2+ chars followed by isolated 1-2 chars (e.g., "wit h" → "with")
-    text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})\b', merge_suffix_careful, text)
+    # But NOT when the single char starts a common word
+    text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})\b', merge_suffix_smart, text)
+
     
     # =========================================================================
     # 6. UNIVERSAL FALLBACK: Catch remaining run-on patterns
@@ -1524,15 +1668,50 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
 
         # Continuation line - append to current context
         if current_q:
-            if current_q["options"]:
-                # Check if this line is actually a new question start that regex missed?
-                # e.g. "12. " without text? No, regex handles that.
-                # Just append to last option
-                current_q["options"][-1]["text"] += " " + line
-            else:
-                current_q["prompt"] += " " + line
+            # CRITICAL: Don't append lines that are clearly answer key section
+            lower_line = line.lower().strip()
+            is_answer_section = False
+            
+            # If we already have Q100 parsed, stop appending anything new
+            if current_q.get("number") == 100 and len(current_q.get("options", [])) >= 4:
+                is_answer_section = True
+            
+            # Markers that indicate we've hit the answer key/footer section
+            answer_markers = [
+                'center®', 'columbus', 'mba research', 'key', 'copyright', 
+                'dba mba', 'herein is', 'test item', 'individual items',
+                'specifically authorized', 'source:', 'retrieved august',
+                'retrieved september', 'retrieved october', 'retrieved november',
+                'retrieved december', 'retrieved january', 'retrieved february',
+                'contract law', 'constitutional law', 'probate', 'patent',
+                ').', ']. ', 'http://', 'https://'
+            ]
+            
+            for marker in answer_markers:
+                if marker in lower_line:
+                    is_answer_section = True
+                    break
+            
+            # Also check if line looks like an answer key entry (e.g., "1. D")
+            if not is_answer_section and answer_key_entry_re.match(line):
+                is_answer_section = True
+            
+            # Skip blank lines
+            if not is_answer_section and not line.strip():
+                is_answer_section = True
+            
+            if not is_answer_section:
+                if current_q["options"]:
+                    # Check if this line is actually a new question start that regex missed?
+                    # e.g. "12. " without text? No, regex handles that.
+                    # Just append to last option
+                    current_q["options"][-1]["text"] += " " + line
+                else:
+                    current_q["prompt"] += " " + line
 
     finalize_current()
+
+
 
     final_questions = []
     seen_ids = set()
