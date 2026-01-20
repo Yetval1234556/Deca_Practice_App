@@ -9,7 +9,10 @@ import shutil
 import concurrent.futures
 import time
 import sqlite3
+import hashlib
+from functools import lru_cache
 from pathlib import Path
+
 from typing import Dict, List, Any, Optional, IO
 
 from flask import Flask, jsonify, render_template, request, abort, redirect, url_for, session
@@ -1194,32 +1197,25 @@ COMMON_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in COMMON_FIXES_RAW]
 
 ADDITIONAL_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in ADDITIONAL_FIXES_RAW]
 def _fix_broken_words(text: str) -> str:
-    if not text: return ""
+    # Skip empty or very short strings (like "A", "Yes")
+    if not text or len(text) < 4: return text
     
     # =========================================================================
     # 1. FIX COMMON SPLIT WORDS (highest impact - 140k+ fixes)
     # =========================================================================
-    # These are the most common PDF extraction artifacts - comprehensive list
-    # Used global COMMON_FIXES
+    # Quick early exit if text doesn't have spaces (no broken words possible)
+    if ' ' not in text:
+        return text
     
     # Fix spacing after common explanation labels (Run this FIRST to separate words)
-    text = re.sub(r'\b(SOURCE|Rationale|Answer|Note):([^\s])', r'\1: \2', text, flags=re.IGNORECASE)
-    # Fix broken "SOURCE" typically found
-    text = re.sub(r'\bSOURC\s*E\b', 'SOURCE', text)
-    text = re.sub(r'\bSOURCE\s+:\s*', 'SOURCE: ', text)
+    if ':' in text:
+        text = re.sub(r'\b(SOURCE|Rationale|Answer|Note):([^\s])', r'\1: \2', text, flags=re.IGNORECASE)
+        text = re.sub(r'\bSOURC\s*E\b', 'SOURCE', text)
+        text = re.sub(r'\bSOURCE\s+:\s*', 'SOURCE: ', text)
 
+    # Apply all pattern fixes
     for pattern, replacement in COMMON_FIXES:
-        def preserve_case(m):
-            match_text = m.group(0)
-            # If original was ALL CAPS, make replacement ALL CAPS
-            if match_text.isupper():
-                return replacement.upper()
-            # If original was Capitalized, make replacement Capitalized
-            if match_text and match_text[0].isupper():
-                return replacement[0].upper() + replacement[1:]
-            return replacement
-            
-        text = pattern.sub(preserve_case, text)
+        text = pattern.sub(replacement, text)
     
     # =========================================================================
     # 2. FIX HYPHENATION ISSUES (11k+ fixes)
@@ -1786,11 +1782,26 @@ def _smart_parse_questions(lines: List[str], answers: Dict[int, Any]) -> List[Di
         
     return final_questions
 
+# Cache for parsed PDFs - keyed by (file_path, mtime) to invalidate on change
+_pdf_cache: Dict[str, Dict[str, Any]] = {}
+
 def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any]:
+    # Check cache for file sources
+    cache_key = None
+    if isinstance(source, Path):
+        try:
+            mtime = source.stat().st_mtime
+            cache_key = f"{source}:{mtime}"
+            if cache_key in _pdf_cache:
+                return _pdf_cache[cache_key]
+        except:
+            pass
+    
     try:
         lines = _extract_clean_lines(source)
         answers = _parse_answer_key(lines)
         questions = _smart_parse_questions(lines, answers)
+
         
         questions.sort(key=lambda x: x["number"])
         
@@ -1801,14 +1812,21 @@ def _parse_pdf_source(source: Path | IO[bytes], name_hint: str) -> Dict[str, Any
         for q in questions:
             q["id"] = f"{test_id}-q{q['number']}"
 
-        return {
+        result = {
             "id": test_id,
             "name": name_hint,
             "description": "",
             "questions": questions,
             "question_count": len(questions)
         }
+        
+        # Cache the result
+        if cache_key:
+            _pdf_cache[cache_key] = result
+            
+        return result
     except Exception as e:
+
         
         app.logger.error(f"PDF parsing error for '{name_hint}': {e}", exc_info=True)
         logger.warning(f"Parsing error for '{name_hint}': {e}")
