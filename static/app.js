@@ -686,12 +686,21 @@ function startSessionTimer(startedAt) {
         state.timerInterval = null;
     }
 
-
     const isDisabled = localStorage.getItem("deca-timer-disabled") === "true";
     const suppressTimer = isDisabled && state.mode !== "exam";
-    // When the timer is disabled, we still track elapsed time but we do not enforce a limit.
 
-    if (!state.timeLimitMs || state.timeLimitMs <= 0 || suppressTimer) {
+    // When timer is fully disabled, don't start any timer functionality
+    if (suppressTimer) {
+        state.timeLimitMs = 0;
+        state.timeRemainingMs = 0;
+        state.totalElapsedMs = 0;
+        state.sessionStart = null;
+        updateTimerDisplay();
+        persistSession();
+        return;
+    }
+
+    if (!state.timeLimitMs || state.timeLimitMs <= 0) {
         state.timeLimitMs = 0;
         state.timeRemainingMs = 0;
     }
