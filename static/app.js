@@ -1169,6 +1169,7 @@ async function startTest(testId, count = 0, mode = "regular", timeLimitMinutes =
         startSessionTimer();
         activeTestName.textContent = state.activeTest.name;
         questionArea.classList.remove("hidden");
+        summaryArea.classList.add("hidden");
         updateSessionMeta();
         renderQuestionCard();
     } catch (err) {
