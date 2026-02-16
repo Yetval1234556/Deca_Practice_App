@@ -805,6 +805,100 @@ COMMON_FIXES_RAW = [
 ]
 
 ADDITIONAL_FIXES_RAW = [
+    # === FIX: Common word splits that the general merge logic misses ===
+    (r'\ban\s+d\b', 'and'),  # "an d" → "and" (common split missed by prefix merge)
+    (r'\bExclu\s*sive\b', 'Exclusive'),
+    (r'\bexclu\s*sive\b', 'exclusive'),
+    (r'\binclu\s*sive\b', 'inclusive'),
+    (r'\binc\s*ome\b', 'income'),
+    (r'\boutc\s*ome\b', 'outcome'),
+    (r'\bresou\s*rces\b', 'resources'),
+    (r'\bresou\s*rce\b', 'resource'),
+    (r'\bth\s*rough\b', 'through'),
+    (r'\bth\s*an\b', 'than'),
+    (r'\bYo\s*ucan\b', 'You can'),
+    (r'\bus\s*er\b', 'user'),
+    (r'\bunabl\s*e\b', 'unable'),
+    (r'\brobo\s*ts\b', 'robots'),
+    (r'\brisk\s*s\b', 'risks'),
+    (r'\bAlthoug\s*h\b', 'Although'),
+    (r'\bThoug\s*h\b', 'Though'),
+    (r'\bThroug\s*h\b', 'Through'),
+    (r'\bEnoug\s*h\b', 'Enough'),
+    (r'\balthoug\s*h\b', 'although'),
+    (r'\bthoug\s*h\b', 'though'),
+    (r'\bthroug\s*h\b', 'through'),
+    (r'\benoug\s*h\b', 'enough'),
+    (r'\bpar\s*t\b', 'part'),
+    (r'\bpar\s*ts\b', 'parts'),
+    (r'\bcos\s*t\b', 'cost'),
+    (r'\bcos\s*ts\b', 'costs'),
+    (r'\bno\s*t\b', 'not'),
+    (r'\bmus\s*t\b', 'must'),
+    (r'\bbes\s*t\b', 'best'),
+    (r'\btes\s*t\b', 'test'),
+    (r'\blis\s*t\b', 'list'),
+    (r'\bjus\s*t\b', 'just'),
+    (r'\blas\s*t\b', 'last'),
+    (r'\bfirs\s*t\b', 'first'),
+    (r'\bmos\s*t\b', 'most'),
+    (r'\bpos\s*t\b', 'post'),
+    (r'\brus\s*t\b', 'rust'),
+    (r'\btrus\s*t\b', 'trust'),
+    (r'\binteres\s*t\b', 'interest'),
+    (r'\bconsis\s*t\b', 'consist'),
+    (r'\bexis\s*t\b', 'exist'),
+    (r'\bproduc\s*t\b', 'product'),
+    (r'\bimpac\s*t\b', 'impact'),
+    (r'\bcontac\s*t\b', 'contact'),
+    (r'\bexac\s*t\b', 'exact'),
+    (r'\bdirec\s*t\b', 'direct'),
+    (r'\bshor\s*t\b', 'short'),
+    (r'\brepor\s*t\b', 'report'),
+    (r'\bmar\s*ket\b', 'market'),
+    (r'\bbene\s*fit\b', 'benefit'),
+    (r'\bben\s*efit\b', 'benefit'),
+    (r'\bprofes\s*sion\b', 'profession'),
+    (r'\bimpor\s*t\b', 'import'),
+    (r'\bexpor\s*t\b', 'export'),
+    (r'\bcomfor\s*t\b', 'comfort'),
+    (r'\bsuppor\s*t\b', 'support'),
+    (r'\btranspor\s*t\b', 'transport'),
+    (r'\beffec\s*t\b', 'effect'),
+    (r'\bselec\s*t\b', 'select'),
+    (r'\bprojec\s*t\b', 'project'),
+    (r'\bsubjec\s*t\b', 'subject'),
+    (r'\bobjec\s*t\b', 'object'),
+    (r'\bprotec\s*t\b', 'protect'),
+    (r'\bdetec\s*t\b', 'detect'),
+    (r'\bexpec\s*t\b', 'expect'),
+    (r'\brespec\s*t\b', 'respect'),
+    (r'\binsec\s*t\b', 'insect'),
+    (r'\binfec\s*t\b', 'infect'),
+    (r'\bcollec\s*t\b', 'collect'),
+    (r'\bconnec\s*t\b', 'connect'),
+    (r'\bproduc\s*ts\b', 'products'),
+    (r'\bcontrac\s*t\b', 'contract'),
+    (r'\bcontrac\s*ts\b', 'contracts'),
+    (r'\bus\s*e\b', 'use'),
+    (r'\bthos\s*e\b', 'those'),
+    (r'\bthes\s*e\b', 'these'),
+    (r'\bclos\s*e\b', 'close'),
+    (r'\bpurpos\s*e\b', 'purpose'),
+    (r'\bpurchas\s*e\b', 'purchase'),
+    (r'\bincreas\s*e\b', 'increase'),
+    (r'\bdecreas\s*e\b', 'decrease'),
+    (r'\breleas\s*e\b', 'release'),
+    (r'\bchoos\s*e\b', 'choose'),
+    (r'\brespons\s*e\b', 'response'),
+    (r'\bexpens\s*e\b', 'expense'),
+    (r'\bdefens\s*e\b', 'defense'),
+    (r'\blicens\s*e\b', 'license'),
+    (r'\bpromis\s*e\b', 'promise'),
+    (r'\bexercis\s*e\b', 'exercise'),
+    (r'\bpractic\s*e\b', 'practice'),
+    (r'\bservic\s*e\b', 'service'),
+
     # Words found in spacing analysis that were still broken
     (r'\bciv\s*il\b', 'civil'),
     (r'\bmaj\s*ority\b', 'majority'),
@@ -1216,7 +1310,9 @@ ADDITIONAL_FIXES_RAW = [
 
 COMMON_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in COMMON_FIXES_RAW]
 
-ADDITIONAL_FIXES = [(re.compile(p, re.IGNORECASE), r) for p, r in ADDITIONAL_FIXES_RAW]
+# Compile ADDITIONAL_FIXES case-sensitively since patterns contain explicit case.
+# COMMON_FIXES (compiled with IGNORECASE) already handles case-insensitive matching.
+ADDITIONAL_FIXES = [(re.compile(p), r) for p, r in ADDITIONAL_FIXES_RAW]
 def _fix_broken_words(text: str) -> str:
     # Skip empty or very short strings (like "A", "Yes")
     if not text or len(text) < 4: return text
@@ -1310,12 +1406,28 @@ def _fix_broken_words(text: str) -> str:
     valid_short = {
         'a', 'i', 'am', 'an', 'as', 'at', 'be', 'by', 'do', 'go', 'he', 'if', 
         'in', 'is', 'it', 'me', 'my', 'no', 'of', 'on', 'or', 'so', 'to', 'up', 
-        'us', 'we', 'a.', 'b.', 'c.', 'd.', 'e.', 're', 'vs', 'ok', 'ex'
+        'us', 'we', 'a.', 'b.', 'c.', 'd.', 'e.', 'vs', 'ok', 'th'
     }
+    
+    # Common prefixes that look like short words but should merge with following text
+    merge_prefixes = {'re', 'ex', 'un', 'in', 'im', 'ir', 'il', 'de', 'en', 'em', 'co'}
     
     def merge_prefix_careful(match):
         p, w = match.group(1), match.group(2)
-        if p.lower() in valid_short: 
+        p_lower = p.lower()
+        # Special case: "th" + vowel-starting word is almost always "the" + word
+        # (e.g., "th emethods" → should stay as "th emethods" not merge to "themethods")
+        if p_lower == 'th' and w[0].lower() in 'aeiou':
+            return match.group(0)
+        # Don't merge if it would create a camelCase run-on (e.g., "th" + "eProject")
+        if len(p) <= 2 and w[0].islower():
+            merged = p + w
+            if any(c.isupper() for c in merged[1:]):
+                return match.group(0)
+        # Always merge known word-forming prefixes when followed by 4+ chars
+        if p_lower in merge_prefixes and len(w) >= 4:
+            return p + w
+        if p_lower in valid_short: 
             return match.group(0)
         return p + w
 
@@ -1323,29 +1435,16 @@ def _fix_broken_words(text: str) -> str:
     # Added (?<!') to prevent merging possessives like "owner's invention" -> "owner'sinvention"
     text = re.sub(r"(?<!')\b([a-zA-Z]{1,2})\s+([a-zA-Z]{3,})\b", merge_prefix_careful, text)
     
-    def merge_suffix_careful(match):
-        w, s = match.group(1), match.group(2)
-        if s.lower() in valid_short: 
-            return match.group(0)
-        # Don't merge with answer options A-E
-        if s in {'A','B','C','D','E'}: 
-            return match.group(0)
-        # For single char suffixes, only merge common word endings
-        if len(s) == 1:
-            if s.lower() not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'h', 'k', 'p', 'g', 'm'}: 
-                return match.group(0)
-        return w + s
-    
-    # FIXED: Don't merge single letters that commonly START words like has/was/his/her
-    # Check what follows the pattern - if it forms a common word, don't merge
-    common_word_starts = {
-        'h': {'as', 'is', 'er', 'im', 'ad', 'ave', 'ow', 'ere', 'eld'},  # has, his, her, him, had, have, how, here, held
-        'w': {'as', 'ith', 'ill', 'ere', 'hy', 'hen', 'hat', 'ho', 'ay', 'ould', 'ant'},  # was, with, will, were, why, when, what, who, way, would, want
-        't': {'he', 'his', 'hat', 'hen', 'hey', 'hem', 'here', 'hose', 'hus', 'heir'},  # the, this, that, then, they, them, there, those, thus, their
+    # Known common words formed by single-letter + following text
+    # Used to decide if a trailing single letter starts a new word or is a broken suffix
+    _common_words_by_start = {
+        'h': {'has', 'his', 'her', 'him', 'had', 'have', 'how', 'here', 'held', 'he'},
+        'w': {'was', 'with', 'will', 'were', 'why', 'when', 'what', 'who', 'way', 'would', 'want', 'we'},
+        't': {'the', 'this', 'that', 'then', 'they', 'them', 'there', 'those', 'thus', 'their', 'to'},
     }
     
     def merge_suffix_smart(match):
-        w, s = match.group(1), match.group(2)
+        w, s, next_word = match.group(1), match.group(2), match.group(3)
         full_text = match.group(0)
         
         if s.lower() in valid_short: 
@@ -1354,21 +1453,41 @@ def _fix_broken_words(text: str) -> str:
         if s in {'A','B','C','D','E'}: 
             return full_text
             
-        # For single char suffixes, check if it could start a common word
+        # For single char suffixes, use CONTEXT to decide
         if len(s) == 1:
             letter = s.lower()
-            # Check if this letter starts common words - if so, DON'T merge
-            if letter in common_word_starts:
-                # Don't merge - this single letter likely starts a word like "has", "was", "the"
+            if letter in _common_words_by_start and next_word:
+                # Check if letter + next_word forms a known common word
+                candidate = letter + next_word.lower()
+                if candidate in _common_words_by_start[letter]:
+                    # The single letter IS the start of a real word (e.g., "h" + "as" = "has")
+                    # Don't merge it with the preceding fragment
+                    return full_text
+            # Safe to merge - it's a broken word suffix
+            # (but still only merge known word-ending characters)
+            if letter not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'h', 'k', 'p', 'g', 'm', 'w', 'y', 'f', 'c', 'x'}: 
                 return full_text
-            # Only merge known safe word-ending characters
-            if letter not in {'s', 'd', 'r', 'n', 't', 'l', 'e', 'k', 'p', 'g', 'm'}: 
-                return full_text
+        
+        # For 2-char suffixes, keep existing logic
+        if len(s) == 2 and s.lower() in valid_short:
+            return full_text
+        
+        # Merge: reconstruct without the space between w and s, but keep next_word separate
+        if next_word:
+            return w + s + ' ' + next_word
         return w + s
 
     # Merge 2+ chars followed by isolated 1-2 chars (e.g., "wit h" → "with")
-    # But NOT when the single char starts a common word
-    text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})\b', merge_suffix_smart, text)
+    # Now captures the NEXT word too for context-aware merging decisions
+    text = re.sub(r'\b([a-zA-Z]{2,})\s+([a-zA-Z]{1,2})(?:\s+([a-zA-Z]+))?\b', merge_suffix_smart, text)
+
+    # After merging, re-apply run-on word splitting to catch newly-created run-ons
+    # e.g., "th" + "emethods" merged to "themethods" → should be "the methods"
+    text = _RUNON_RE.sub(r'\1 \2', text)
+    
+    # Fix remaining "th e..." patterns: "th" + vowel-starting word = "the" + word
+    # (e.g., "th esame" → "the same", "th emethods" → "the methods")
+    text = re.sub(r'\bth\s+e([a-z]{2,})\b', lambda m: 'the ' + m.group(1), text, flags=re.IGNORECASE)
 
     
     # =========================================================================
