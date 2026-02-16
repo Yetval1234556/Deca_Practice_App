@@ -1,4 +1,6 @@
 import sqlite3
+import boto3
+import argparse
 import time
 import os
 import sys
@@ -168,5 +170,52 @@ def show_active_users():
     except Exception as e:
         print(f"❌ Error reading database: {e}")
 
+def list_connect_users(instance_id, region_name=None):
+    """
+    Lists users from a specific Amazon Connect instance.
+    """
+    try:
+        # Pass region_name if provided, otherwise let boto3 resolve it
+        client = boto3.client('connect', region_name=region_name)
+        print(f"Listing users for Instance ID: {instance_id}")
+        if region_name:
+            print(f"Region: {region_name}")
+        
+        users = []
+        next_token = None
+
+        while True:
+            kwargs = {
+                'InstanceId': instance_id,
+                'MaxResults': 10
+            }
+            if next_token:
+                kwargs['NextToken'] = next_token
+
+            response = client.list_users(**kwargs)
+            
+            for user_summary in response.get('UserSummaryList', []):
+                users.append(user_summary)
+                print(f" - User: {user_summary['Username']} (ID: {user_summary['Id']})")
+
+            next_token = response.get('NextToken')
+            if not next_token:
+                break
+                
+        print(f"\nTotal users found: {len(users)}")
+        return users
+
+    except Exception as e:
+        print(f"An error occurred: {e}")
+        return []
+
 if __name__ == "__main__":
-    show_active_users()
+    parser = argparse.ArgumentParser(description="Show active users or AWS Connect users.")
+    parser.add_argument("--connect", help="AWS Connect Instance ID to list users from", required=False)
+    parser.add_argument("--region", help="AWS Region (e.g., us-east-1)", required=False)
+    args = parser.parse_args()
+
+    if args.connect:
+        list_connect_users(args.connect, args.region)
+    else:
+        show_active_users()

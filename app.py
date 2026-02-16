@@ -121,17 +121,39 @@ def _background_cleanup():
 cleanup_thread = threading.Thread(target=_background_cleanup, daemon=True)
 cleanup_thread.start()
 
+
+# Words that commonly appear smashed onto the end of a previous word in PDF extraction.
+# Used by _normalize_whitespace to surgically split run-ons without breaking valid words.
+_RUNON_SPLIT_WORDS = {
+    'The', 'This', 'That', 'These', 'Those', 'Then', 'There', 'Their', 'They', 'Them',
+    'When', 'Where', 'Which', 'While', 'What', 'Who', 'Why', 'How',
+    'However', 'Therefore', 'Because', 'Although', 'Since', 'Before', 'After',
+    'For', 'From', 'With', 'About', 'Into', 'Over', 'Under', 'Between',
+    'And', 'But', 'Not', 'Also', 'Each', 'Every', 'Most', 'Some', 'All',
+    'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
+    'SOURCE', 'Rationale', 'Answer', 'Note',
+    'An', 'As', 'At', 'Be', 'By', 'Do', 'Go', 'He', 'If', 'In', 'Is', 'It',
+    'Me', 'My', 'No', 'Of', 'On', 'Or', 'So', 'To', 'Up', 'Us', 'We',
+    'Are', 'Can', 'Did', 'Has', 'Had', 'His', 'Her', 'Its', 'May', 'Our', 'Own',
+    'Any', 'New', 'Old', 'Per', 'Use', 'Was', 'Way', 'Set',
+    'Should', 'Would', 'Could', 'Must', 'Will', 'Shall', 'Does', 'Have',
+}
+# Build a regex alternation sorted longest-first so greedier words match first
+_RUNON_ALTS = '|'.join(sorted(_RUNON_SPLIT_WORDS, key=len, reverse=True))
+_RUNON_RE = re.compile(r'([a-z])(' + _RUNON_ALTS + r')(?=[^a-z]|$)')
+
 def _normalize_whitespace(text: str) -> str:
     if not isinstance(text, str):
         return ""
-    
-    text = re.sub(r"([a-z])([A-Z])", r"\1 \2", text)
-    
+
+    # Split only at TRUE run-on word boundaries (e.g. "companyThe" -> "company The")
+    # instead of blindly splitting every lowercase-uppercase transition.
+    text = _RUNON_RE.sub(r'\1 \2', text)
+
     # Fix specific common broken words
     text = text.replace("SOURC E", "SOURCE")
     text = re.sub(r"\b(SOURC)\s+(E)\b", "SOURCE", text)
 
-    text = re.sub(r"\b(\w+)\s+(ment|tion|ing|able|ible|ness)\b", r"\1\2", text)
     return re.sub(r"\s+", " ", text).strip()
 
 def _strip_leading_number(text: str) -> str:

@@ -1,6 +1,6 @@
-const SESSION_KEY = "deca-active-session-v1";
-const HISTORY_KEY = "deca-history-v1";
-const LOCAL_TESTS_KEY = "deca-local-tests-v1";
+const SESSION_KEY = "deca-active-session-v2";
+const HISTORY_KEY = "deca-history-v2";
+const LOCAL_TESTS_KEY = "deca-local-tests-v2";
 const DEFAULT_TIME_LIMIT_MINUTES = 90;
 
 const state = {
