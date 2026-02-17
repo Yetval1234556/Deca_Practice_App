@@ -194,12 +194,7 @@ def track_active_user():
     except Exception:
         pass  # Don't fail request if tracking fails
 
-@app.after_request
-def add_header(response):
-    # User requested to "remove all browser cache"
-    # This header instructs the browser to clear cache, cookies, and storage for this origin.
-    response.headers["Clear-Site-Data"] = '"cache", "cookies", "storage"'
-    return response
+
 
 @app.errorhandler(HTTPException)
 def _json_http_error(exc: HTTPException):
